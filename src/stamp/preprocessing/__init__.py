@@ -223,6 +223,11 @@ def extract_(
 
             extractor = plip()
 
+        case ExtractorName.TICON:
+            from stamp.preprocessing.extractor.ticon_iso import ticon_iso
+
+            extractor = ticon_iso()
+
         case ExtractorName.EMPTY:
             from stamp.preprocessing.extractor.empty import empty
 

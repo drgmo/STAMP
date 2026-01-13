@@ -1,13 +1,18 @@
 preprocessing:
-  output_dir: "/path/to/save/files/to"
-  wsi_dir: "/path/containing/whole/slide/images/to/extract/features/from"
+  output_dir: "path/to/output/dir"
+  wsi_dir: "path/to/your/wsi"
   # Extractor to use for feature extractor.  Possible options are "ctranspath",
   # "uni", "conch", "chief-ctranspath", "conch1_5", "uni2", "dino-bloom",
   # "gigapath", "h-optimus-0", "h-optimus-1", "virchow2", "virchow", 
-  # "virchow-full", "musk", "mstar", "plip"
+  # "virchow-full", "musk", "mstar", "plip" "ticon"
   # Some of them require requesting access to the respective authors beforehand.
-  extractor: "chief-ctranspath"
-
+  extractor: "ticon"
+  
+  # When ticon is selected as an isolated feature extractor, you need to specify
+  # the tile extractor for applying ticons-architecture on.
+  # possible: "h-optimus-1", "virchow2", "gigapath", "uni2", "conch1_5"
+  # if none is chosen, "h-optimus-1" is used as default.
+  tile_extractor: "virchow2"
   # Device to run feature extraction on ("cpu", "cuda", "cuda:0", etc.)
   device: "cuda"
 
@@ -40,13 +45,13 @@ preprocessing:
 
   # A list (.txt, .xlsx or .csv) specifying filenames (without ending) to preprocess 
   # instead of processing all data in the directory.
-  wsi_list: "path/to/wsi_list.txt"
+  #wsi_list: "path/to/wsi_list.txt"
 
   # Optional per-slide MPP override list (.txt, .xlsx or .csv).
   # Each row: path/to/filename.suffix, mpp_x.
   # If provided, this value is used as the slide's MPP (typically as fallback
   # if MPP extraction from slide metadata fails).
-  mpp_list: "path/to/mpp_list.txt"
+  #mpp_list: "path/to/mpp_list.txt"
 
 crossval:
   output_dir: "/path/to/save/files/to"
@@ -255,14 +260,21 @@ heatmaps:
 
 slide_encoding:
   # Encoder to use for slide encoding. Possible options are "cobra",
-  # "eagle", "titan", "gigapath", "chief", "prism", "madeleine".
-  encoder: "chief"
-  
+  # "eagle", "titan", "gigapath", "chief", "prism", "madeleine", "ticon"
+  encoder: "ticon"
+
   # Directory to save the output files.
-  output_dir: "/path/to/save/files/to"
+  output_dir: "path/to/save/files/to"
   
-  # Directory where the extracted features are stored.
-  feat_dir: "/path/your/extracted/features/are/stored/in"
+  # Directory where the extracted features are stored. Options:
+  # for ticon: h-optimus-1, virchow2, gigapath, uni2, conch1_5
+  # for cobraI: CTransPath, UNI, Virchow2, H_optimus_0; for cobraII: CONCH, UNI, Virchow2, H_optimus_0
+  # for eagle: CTransPath
+  # for titan: conch1_5
+  # for prism: virchow_full
+  # for madeleine: conch
+  # for chief: chief-ctranspath
+  feat_dir: "path/to/your/extracted/features"
   
   # Device to run slide encoding on ("cpu", "cuda", "cuda:0", etc.)
   device: "cuda"
