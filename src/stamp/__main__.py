@@ -249,6 +249,21 @@ def _run_cli(args: argparse.Namespace) -> None:
                 opacity=config.heatmaps.opacity,
             )
 
+        case "train_multitask":
+            from stamp.modeling.multitask.train import train_multitask_model_
+
+            if config.multitask_training is None:
+                raise ValueError("no multitask_training configuration supplied")
+
+            _add_file_handle_(
+                _logger, output_dir=config.multitask_training.output_dir
+            )
+            _logger.info(
+                "using the following configuration:\n"
+                f"{yaml.dump(config.multitask_training.model_dump(mode='json', exclude_none=True))}"
+            )
+            train_multitask_model_(config=config.multitask_training)
+
         case _:
             raise RuntimeError(
                 "unreachable: the argparser should only allow valid commands"
@@ -308,6 +323,10 @@ def main() -> None:
     )
     commands.add_parser("config", help="Print the loaded configuration")
     commands.add_parser("heatmaps", help="Generate heatmaps for a trained model")
+    commands.add_parser(
+        "train_multitask",
+        help="Train a multi-task AttnMIL regression model (hrd, tmb, clovar)",
+    )
 
     args = parser.parse_args()
 

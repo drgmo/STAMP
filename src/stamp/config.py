@@ -8,6 +8,7 @@ from stamp.modeling.config import (
     DeploymentConfig,
     TrainConfig,
 )
+from stamp.modeling.multitask.config import MultitaskTrainConfig
 from stamp.preprocessing.config import PreprocessingConfig
 from stamp.statistics import StatsConfig
 
@@ -30,3 +31,5 @@ class StampConfig(BaseModel):
     patient_encoding: PatientEncodingConfig | None = None
 
     advanced_config: AdvancedConfig | None = None
+
+    multitask_training: MultitaskTrainConfig | None = None

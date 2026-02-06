@@ -1,0 +1,74 @@
+# Example configuration for multi-task AttnMIL training.
+# Use with: stamp --config multitask_config.yaml train_multitask
+#
+# This is independent of the standard STAMP training pipeline.
+# Only the multitask_training section is needed for this command.
+
+multitask_training:
+  output_dir: "/path/to/multitask_output"
+  clini_table: "/path/to/clini.csv"
+  slide_table: "/path/to/slide.csv"
+  feature_dir: "/path/to/extracted/features"
+
+  # Column names (defaults match STAMP conventions)
+  patient_label: "PATIENT"
+  filename_label: "FILENAME"
+
+  # Target columns in clini_table and their output dimensions
+  # Each target maps to a regression head
+  target_labels:
+    scarHRD: 1      # scalar regression
+    TMB: 1          # scalar regression
+    CLOVAR_D: 1     # 4 separate heads for CLOVAR subtypes
+    CLOVAR_I: 1
+    CLOVAR_M: 1
+    CLOVAR_P: 1
+
+  # Loss weights per target head
+  loss_weights:
+    scarHRD: 1.0
+    TMB: 0.1
+    CLOVAR_D: 0.3
+    CLOVAR_I: 0.3
+    CLOVAR_M: 0.3
+    CLOVAR_P: 0.3
+
+  # H5 feature key (auto-detected if not set; tries "feats", "patch_embeddings")
+  # h5_feature_key: "feats"
+
+  # Model hyperparameters
+  emb_dim: 256        # Attention MIL embedding dimension
+  bag_size: 512       # Number of tiles sampled per patient bag
+  batch_size: 16      # Training batch size
+  num_workers: 4      # DataLoader workers
+
+  # Training schedule
+  max_epochs: 64
+  patience: 16        # Early stopping patience
+  max_lr: 1.0e-4
+  div_factor: 25.0
+
+  # Loss configuration
+  loss_type: "huber"  # "huber" or "mse"
+  huber_delta: 1.0
+
+  # Hardware
+  accelerator: "gpu"  # "gpu" or "cpu"
+
+  # Reproducibility
+  seed: 42
+
+
+# --- Quick Ablation Experiments ---
+#
+# 1. Bag size ablation:
+#    Try bag_size: 256, 512, 1024
+#    Observe: validation_loss convergence speed & final value
+#
+# 2. Loss weights ablation:
+#    Try equal weights (all 1.0) vs. the defaults above
+#    Observe: per-head losses (training_loss_scarHRD, training_loss_TMB, etc.)
+#
+# 3. Embedding dimension ablation:
+#    Try emb_dim: 128, 256, 512
+#    Observe: validation_loss & overfitting (gap between training/validation loss)
