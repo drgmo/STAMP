@@ -129,6 +129,10 @@ options:
 For a quick introduction how to run stamp,
 check out our [getting started guide](getting-started.md).
 
+## Developer Workflow
+
+- [Testing PR branches locally](docs/testing-pr-branches-locally.md) — how to fetch and test a pull request branch in VS Code before merging.
+
 ## Reference
 
 If you find our work useful in your research
