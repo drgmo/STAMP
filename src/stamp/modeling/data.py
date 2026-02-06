@@ -398,36 +398,21 @@ def load_patient_level_data(
 
 
 @dataclass
-class BagDataset(Dataset):
-    def __init__(self, slide_table_csv, clini_csv, feature_dir, bag_size=512):
-        self.slides = pd.read_csv(slide_table_csv)
-        self.clini = pd.read_csv(clini_csv).set_index("PATIENT")
-        self.feature_dir = feature_dir
-        self.bag_size = bag_size
-        self.patients = self.slides["PATIENT"].unique().tolist()
+class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
+    """A dataset of bags of instances."""
 
-<<<<<<< Updated upstream
     _: KW_ONLY
     bags: Sequence[Iterable[FeaturePath | _BinaryIOLike]]
     """The `.h5` files containing the bags.
-=======
-    def _load_features(self, filename):
-        path = f"{self.feature_dir}/{filename}"
-        with h5py.File(path, "r") as f:
-            X = f["feats"][:]  # STAMP-konform, ggf. key checken
-        return X
->>>>>>> Stashed changes
 
-    def __len__(self):
-        return len(self.patients)
+    Each bag consists of the features taken from one or multiple h5 files.
+    Each of the h5 files needs to have a dataset called `feats` of shape N x F,
+    where N is the number of instances and F the number of features per instance.
+    """
 
-    def __getitem__(self, idx):
-        pid = self.patients[idx]
-        rows = self.slides[self.slides["PATIENT"] == pid]
-        Xs = [self._load_features(fn) for fn in rows["FILENAME"].tolist()]
-        X = np.concatenate(Xs, axis=0)  # (N, d)
+    bag_size: BagSize | None = None
+    """The number of instances in each bag.
 
-<<<<<<< Updated upstream
     For bags containing more instances,
     a random sample of `bag_size` instances will be drawn.
     Smaller bags are padded with zeros.
@@ -435,9 +420,6 @@ class BagDataset(Dataset):
     """
 
     ground_truths: Float[Tensor, "index category_is_hot"] | Float[Tensor, "index 1"]
-
-    # ground_truths: Bool[Tensor, "index category_is_hot"]
-    # """The ground truth for each bag, one-hot encoded."""
 
     transform: Callable[[Tensor], Tensor] | None
 
@@ -478,99 +460,13 @@ class BagDataset(Dataset):
                 *_to_fixed_size_bag(feats, coords=coords_um, bag_size=self.bag_size),
                 self.ground_truths[index],
             )
-=======
-        N = X.shape[0]
-        if N >= self.bag_size:
-            sel = np.random.choice(N, self.bag_size, replace=False)
->>>>>>> Stashed changes
         else:
-            sel = np.random.choice(N, self.bag_size, replace=True)
-        X = torch.from_numpy(X[sel]).float()  # (bag_size, d)
-
-        y = self.clini.loc[pid]
-        target_vec = torch.tensor(
-            [
-                float(y["scarHRD"]),  # 0
-                float(y["TMB"]),  # 1
-                y["CLOVAR_D"],
-                y["CLOVAR_I"],
-                y["CLOVAR_M"],
-                y["CLOVAR_P"],  # 2–5
-            ],
-            dtype=torch.float32,
-        )
-        bag_len = torch.tensor(X.shape[0], dtype=torch.int32)
-
-        return X, bag_len, target_vec
-
-
-# class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
-#     """A dataset of bags of instances."""
-
-#     _: KW_ONLY
-#     bags: Sequence[Iterable[FeaturePath | BinaryIO]]
-#     """The `.h5` files containing the bags.
-
-#     Each bag consists of the features taken from one or multiple h5 files.
-#     Each of the h5 files needs to have a dataset called `feats` of shape N x F,
-#     where N is the number of instances and F the number of features per instance.
-#     """
-
-#     bag_size: BagSize | None = None
-#     """The number of instances in each bag.
-
-#     For bags containing more instances,
-#     a random sample of `bag_size` instances will be drawn.
-#     Smaller bags are padded with zeros.
-#     If `bag_size` is None, all the samples will be used.
-#     """
-
-#     ground_truths: Bool[Tensor, "index category_is_hot"]
-#     """The ground truth for each bag, one-hot encoded."""
-
-#     transform: Callable[[Tensor], Tensor] | None
-
-#     def __post_init__(self) -> None:
-#         if len(self.bags) != len(self.ground_truths):
-#             raise ValueError(
-#                 "the number of ground truths has to match the number of bags"
-#             )
-
-#     def __len__(self) -> int:
-#         return len(self.bags)
-
-#     def __getitem__(
-#         self, index: int
-#     ) -> tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]:
-#         # Collect all the features
-#         feats = []
-#         coords_um = []
-#         for bag_file in self.bags[index]:
-#             with h5py.File(bag_file, "r") as h5:
-#                 feats.append(
-#                     torch.from_numpy(h5["feats"][:])  # pyright: ignore[reportIndexIssue]
-#                 )
-#                 coords_um.append(_get_coords_um(h5))
-
-#         feats = torch.concat(feats).float()
-#         coords_um = torch.concat(coords_um).float()
-
-#         if self.transform is not None:
-#             feats = self.transform(feats)
-
-#         # Sample a subset, if required
-#         if self.bag_size is not None:
-#             return (
-#                 *_to_fixed_size_bag(feats, coords=coords_um, bag_size=self.bag_size),
-#                 self.ground_truths[index],
-#             )
-#         else:
-#             return (
-#                 feats,
-#                 coords_um,
-#                 len(feats),
-#                 self.ground_truths[index],
-#             )
+            return (
+                feats,
+                coords_um,
+                len(feats),
+                self.ground_truths[index],
+            )
 
 
 class PatientFeatureDataset(Dataset):
