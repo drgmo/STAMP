@@ -6,6 +6,7 @@ from stamp.modeling.config import (
     AdvancedConfig,
     CrossvalConfig,
     DeploymentConfig,
+    MultitaskTrainingConfig,
     TrainConfig,
 )
 from stamp.preprocessing.config import PreprocessingConfig
@@ -18,6 +19,7 @@ class StampConfig(BaseModel):
     preprocessing: PreprocessingConfig | None = None
 
     training: TrainConfig | None = None
+    multitask_training: MultitaskTrainingConfig | None = None
     crossval: CrossvalConfig | None = None
     deployment: DeploymentConfig | None = None
 

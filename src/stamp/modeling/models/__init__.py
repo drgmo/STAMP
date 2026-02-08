@@ -514,7 +514,7 @@ class LitSlideRegressor(LitBaseRegressor):
     def _step(
         self,
         *,
-        batch: tuple[Tensor, Tensor],
+        batch: tuple[Tensor, ...] | list[Tensor],
         step_name: str,
     ) -> Loss:
         feats, targets = batch
