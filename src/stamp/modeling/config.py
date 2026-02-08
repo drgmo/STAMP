@@ -127,3 +127,68 @@ class AdvancedConfig(BaseModel):
     )
     model_params: ModelParams
     seed: int | None = None
+
+
+class MultitaskCrossvalConfig(BaseModel):
+    """Optional cross-validation settings for multitask training."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    n_splits: int = Field(5, ge=2)
+    fold_index: int | None = Field(
+        default=None,
+        description="Run only this fold (useful for debugging / HPC scheduling).",
+    )
+    shuffle: bool = True
+    random_state: int | None = 42
+    stratify_target: str | None = Field(
+        default=None,
+        description="Target column to stratify folds on (regression: quantile-binned).",
+    )
+    stratify_bins: int = Field(
+        5,
+        ge=2,
+        description="Number of quantile bins for stratification of regression targets.",
+    )
+
+
+class MultitaskTrainingConfig(BaseModel):
+    """Configuration for ``stamp train_multitask``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    output_dir: Path
+    clini_table: Path
+    slide_table: Path | None = None
+    feature_dir: Path
+    patient_label: PandasLabel = "PATIENT"
+    filename_label: PandasLabel = "FILENAME"
+
+    target_labels: dict[str, int] = Field(
+        description="Mapping of target column name → output dimension (typically 1)."
+    )
+    loss_weights: dict[str, float] | None = Field(
+        default=None,
+        description="Per-target loss weight. Defaults to uniform if unset.",
+    )
+
+    emb_dim: int = 256
+    bag_size: int = 512
+    batch_size: int = 16
+    num_workers: int = min(os.cpu_count() or 1, 16)
+    max_epochs: int = 64
+    patience: int = 16
+    max_lr: float = 1e-4
+    div_factor: float = 25.0
+    loss_type: str = Field(
+        "mse",
+        description='"mse" or "huber".',
+    )
+    huber_delta: float = 1.0
+    accelerator: str = "gpu" if torch.cuda.is_available() else "cpu"
+    seed: int = 42
+
+    crossval: MultitaskCrossvalConfig | None = Field(
+        default=None,
+        description="Cross-validation settings. Disabled by default.",
+    )

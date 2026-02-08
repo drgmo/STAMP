@@ -99,6 +99,43 @@ crossval:
 
 
 
+# Multitask regression training (train_multitask command).
+# Uncomment to enable.
+#multitask_training:
+#  output_dir: "/path/to/save/multitask/output"
+#  clini_table: "/path/of/clini.csv"
+#  slide_table: "/path/of/slide.csv"
+#  feature_dir: "/path/your/extracted/features/are/stored/in"
+#  patient_label: "PATIENT"
+#  filename_label: "FILENAME"
+#  target_labels:
+#    scarHRD: 1
+#    TMB: 1
+#  loss_weights:
+#    scarHRD: 1.0
+#    TMB: 0.1
+#  emb_dim: 256
+#  bag_size: 512
+#  batch_size: 16
+#  max_epochs: 64
+#  patience: 16
+#  max_lr: 1.0e-4
+#  div_factor: 25.0
+#  loss_type: "mse"    # "huber" or "mse"
+#  huber_delta: 1.0
+#  accelerator: "gpu"  # "gpu" or "cpu"
+#  seed: 42
+#  # Optional cross-validation (disabled by default):
+#  #crossval:
+#  #  enabled: true
+#  #  n_splits: 5
+#  #  fold_index: null      # set to run only one fold (debug/HPC)
+#  #  shuffle: true
+#  #  random_state: 42
+#  #  stratify_target: null  # e.g. "scarHRD"
+#  #  stratify_bins: 5
+
+
 training:
   output_dir: "/path/to/save/files/to"
 
