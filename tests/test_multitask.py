@@ -56,6 +56,47 @@ def _create_multitask_dataset(
     return clini_path, feat_dir, tmp_path / "output"
 
 
+def _create_multitask_dataset_in_subdirs(
+    tmp_path: Path,
+    n_patients: int = 30,
+    feat_dim: int = 8,
+    n_tiles: int = 16,
+    target_names: list[str] | None = None,
+) -> tuple[Path, Path, Path]:
+    """Like ``_create_multitask_dataset`` but places feature files in subdirectories.
+
+    Patients are distributed across ``sub_a/`` and ``sub_b/`` subdirectories
+    inside the feature directory.
+    """
+    if target_names is None:
+        target_names = ["target_A", "target_B"]
+
+    feat_dir = tmp_path / "feats"
+    feat_dir.mkdir()
+    sub_a = feat_dir / "sub_a"
+    sub_b = feat_dir / "sub_b"
+    sub_a.mkdir()
+    sub_b.mkdir()
+    clini_path = tmp_path / "clini.csv"
+
+    rows = []
+    for i in range(n_patients):
+        pid = f"PAT_{i:04d}"
+        # Alternate between subdirectories
+        sub = sub_a if i % 2 == 0 else sub_b
+        fpath = sub / f"{pid}.h5"
+        with h5py.File(fpath, "w") as h5:
+            h5["feats"] = np.random.randn(n_tiles, feat_dim).astype(np.float32)
+            h5.attrs["stamp_version"] = "2.4.0"
+            h5.attrs["feat_type"] = "patient"
+        row: dict[str, object] = {"PATIENT": pid}
+        for name in target_names:
+            row[name] = float(np.random.uniform(-10, 10))
+        rows.append(row)
+    pd.DataFrame(rows).to_csv(clini_path, index=False)
+    return clini_path, feat_dir, tmp_path / "output"
+
+
 class TestMultitaskDataset:
     def test_basic_loading(self, tmp_path: Path) -> None:
         clini_path, feat_dir, _ = _create_multitask_dataset(tmp_path, n_patients=5)
@@ -273,3 +314,43 @@ def test_crossval_multitask_many_targets(tmp_path: Path) -> None:
             assert f"{target_name}_true" in preds_df.columns
             assert f"{target_name}_pred" in preds_df.columns
         assert len(preds_df) > 0
+
+
+@pytest.mark.slow
+def test_crossval_multitask_features_in_subdirs(tmp_path: Path) -> None:
+    """Feature files in subdirectories of feature_dir should be found."""
+    Seed.set(42)
+    clini_path, feat_dir, output_dir = _create_multitask_dataset_in_subdirs(
+        tmp_path, n_patients=20
+    )
+
+    config = MultitaskTrainingConfig(
+        output_dir=output_dir,
+        clini_table=clini_path,
+        feature_dir=feat_dir,
+        patient_label="PATIENT",
+        target_labels={"target_A": 1, "target_B": 1},
+        emb_dim=16,
+        bag_size=8,
+        batch_size=4,
+        max_epochs=2,
+        patience=1,
+        accelerator="cpu",
+        seed=42,
+        crossval=MultitaskCrossvalConfig(
+            enabled=True,
+            n_splits=2,
+            shuffle=True,
+            random_state=42,
+        ),
+    )
+    crossval_multitask_(config)
+
+    for fold_i in range(2):
+        fold_dir = output_dir / f"fold_{fold_i}"
+        assert (fold_dir / "patient-preds.csv").exists()
+        preds_df = pd.read_csv(fold_dir / "patient-preds.csv")
+        assert len(preds_df) > 0
+        for target_name in config.target_labels:
+            assert f"{target_name}_true" in preds_df.columns
+            assert f"{target_name}_pred" in preds_df.columns

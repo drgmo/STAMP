@@ -243,6 +243,18 @@ def _load_clini_table(config: MultitaskTrainingConfig) -> pd.DataFrame:
     return df
 
 
+def _build_feature_index(feature_dir: Path) -> dict[str, Path]:
+    """Build a mapping from filename stem to path for all ``.h5`` files.
+
+    Searches *feature_dir* recursively so that feature files stored in
+    subdirectories (e.g. ``feature_dir/encoder_name/PAT_001.h5``) are found.
+    """
+    index: dict[str, Path] = {}
+    for fpath in feature_dir.rglob("*.h5"):
+        index[fpath.stem] = fpath
+    return index
+
+
 def _filter_valid_patients(
     *,
     patient_ids: Sequence[str],
@@ -260,13 +272,16 @@ def _filter_valid_patients(
     feature_dir = Path(config.feature_dir)
     clini_indexed = clini_df.set_index(config.patient_label)
 
+    # Build an index so we find .h5 files even inside subdirectories
+    feat_index = _build_feature_index(feature_dir)
+
     valid_pids: list[str] = []
     feature_files: list[Path] = []
     target_rows: list[list[float]] = []
 
     for pid in patient_ids:
-        fpath = feature_dir / f"{pid}.h5"
-        if not fpath.exists():
+        fpath = feat_index.get(pid)
+        if fpath is None:
             _logger.warning(f"Feature file not found for patient {pid}, skipping")
             continue
         if pid not in clini_indexed.index:
