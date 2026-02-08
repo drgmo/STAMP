@@ -181,17 +181,16 @@ def test_crossval_multitask(tmp_path: Path) -> None:
 
         # Verify patient-preds.csv content
         preds_df = pd.read_csv(fold_dir / "patient-preds.csv")
-        assert "PATIENT" in preds_df.columns
-        assert "target_A_true" in preds_df.columns
-        assert "target_A_pred" in preds_df.columns
-        assert "target_B_true" in preds_df.columns
-        assert "target_B_pred" in preds_df.columns
+        assert config.patient_label in preds_df.columns
+        for target_name in config.target_labels:
+            assert f"{target_name}_true" in preds_df.columns
+            assert f"{target_name}_pred" in preds_df.columns
         assert len(preds_df) > 0
 
         # Verify predicted patients match the val set in the split
         split = json.loads((fold_dir / "fold_split.json").read_text())
         val_set = set(split["val_patients"])
-        pred_pids = set(preds_df["PATIENT"].tolist())
+        pred_pids = set(preds_df[config.patient_label].tolist())
         assert pred_pids == val_set, "Predicted patients should match val set exactly!"
 
     # Verify no patient overlap between train/val in each fold
