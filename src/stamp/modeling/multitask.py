@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -381,8 +382,6 @@ def _train_and_save(
     )
     trainer.fit(model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
-    import shutil
-
     best = ckpt_cb.best_model_path
     dst = output_dir / "model.ckpt"
     if best:
@@ -397,10 +396,11 @@ def _train_and_save(
 
 def train_multitask_(config: MultitaskTrainingConfig) -> None:
     """Train a multitask model with a single train/val split."""
+    Seed.set(config.seed)
     clini_df = _load_clini_table(config)
     all_pids = clini_df[config.patient_label].unique().tolist()
 
-    # Simple random split (80/20)
+    # Deterministic shuffle for the split
     rng = np.random.RandomState(config.seed)
     rng.shuffle(all_pids)
     split = int(0.8 * len(all_pids))
