@@ -354,8 +354,8 @@ def get_thresholds(
 
     if "youden" in include:
         fpr, tpr, thr = roc_curve(y_true, y_score)
-        youden_j = tpr + (1 - fpr) - 1
-        # Among ties, pick the smallest threshold (documented behaviour)
+        youden_j = tpr - fpr
+        # Among ties, pick the smallest threshold (documented behavior)
         best_idx = int(np.where(youden_j == youden_j.max())[0][0])
         thresholds["youden"] = float(np.clip(thr[best_idx], 0.0, 1.0))
 
