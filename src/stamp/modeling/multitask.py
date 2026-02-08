@@ -243,18 +243,24 @@ def _load_clini_table(config: MultitaskTrainingConfig) -> pd.DataFrame:
     return df
 
 
-def _build_dataset(
+def _filter_valid_patients(
     *,
     patient_ids: Sequence[str],
     clini_df: pd.DataFrame,
     config: MultitaskTrainingConfig,
-    bag_size: int | None,
-) -> MultitaskDataset:
-    """Build a MultitaskDataset for the given patient IDs."""
+) -> tuple[list[str], list[Path], list[list[float]]]:
+    """Filter patient IDs to those with valid features and target values.
+
+    Returns:
+        valid_pids: patient IDs that passed filtering.
+        feature_files: corresponding feature file paths.
+        target_rows: corresponding target value rows.
+    """
     target_names = list(config.target_labels.keys())
     feature_dir = Path(config.feature_dir)
     clini_indexed = clini_df.set_index(config.patient_label)
 
+    valid_pids: list[str] = []
     feature_files: list[Path] = []
     target_rows: list[list[float]] = []
 
@@ -271,9 +277,26 @@ def _build_dataset(
         except (KeyError, ValueError) as e:
             _logger.warning(f"Skipping patient {pid}: {e}")
             continue
+        valid_pids.append(pid)
         feature_files.append(fpath)
         target_rows.append(vals)
 
+    return valid_pids, feature_files, target_rows
+
+
+def _build_dataset(
+    *,
+    patient_ids: Sequence[str],
+    clini_df: pd.DataFrame,
+    config: MultitaskTrainingConfig,
+    bag_size: int | None,
+) -> MultitaskDataset:
+    """Build a MultitaskDataset for the given patient IDs."""
+    _, feature_files, target_rows = _filter_valid_patients(
+        patient_ids=patient_ids,
+        clini_df=clini_df,
+        config=config,
+    )
     targets = torch.tensor(target_rows, dtype=torch.float32)
     return MultitaskDataset(
         feature_files=feature_files, targets=targets, bag_size=bag_size
@@ -403,6 +426,13 @@ def _predict_multitask(
     """
     target_names = list(config.target_labels.keys())
 
+    # Get the valid patient IDs (same filtering as _build_dataset)
+    valid_pids, _, _ = _filter_valid_patients(
+        patient_ids=patient_ids,
+        clini_df=clini_df,
+        config=config,
+    )
+
     # Build a dataset with bag_size=None (use all tiles at inference)
     ds = _build_dataset(
         patient_ids=patient_ids,
@@ -438,22 +468,6 @@ def _predict_multitask(
             }
             all_preds.append(pred_row)
             all_trues.append(true_row)
-
-    # Match patient IDs to dataset entries (skip patients that were filtered)
-    # _build_dataset filters patients without features or valid targets,
-    # so reconstruct the valid ID list in the same order.
-    clini_indexed = clini_df.set_index(config.patient_label)
-    feature_dir = Path(config.feature_dir)
-    valid_pids: list[str] = []
-    for pid in patient_ids:
-        fpath = feature_dir / f"{pid}.h5"
-        if not fpath.exists() or pid not in clini_indexed.index:
-            continue
-        try:
-            _ = [float(clini_indexed.loc[pid][t]) for t in target_names]
-        except (KeyError, ValueError):
-            continue
-        valid_pids.append(pid)
 
     rows = []
     for pid, true_row, pred_row in zip(valid_pids, all_trues, all_preds):

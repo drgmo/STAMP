@@ -192,7 +192,7 @@ def test_crossval_multitask(tmp_path: Path) -> None:
         split = json.loads((fold_dir / "fold_split.json").read_text())
         val_set = set(split["val_patients"])
         pred_pids = set(preds_df["PATIENT"].tolist())
-        assert pred_pids.issubset(val_set), "Predictions contain patients not in val set!"
+        assert pred_pids == val_set, "Predicted patients should match val set exactly!"
 
     # Verify no patient overlap between train/val in each fold
     for fold_i in range(2):
