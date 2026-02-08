@@ -354,3 +354,90 @@ def test_crossval_multitask_features_in_subdirs(tmp_path: Path) -> None:
         for target_name in config.target_labels:
             assert f"{target_name}_true" in preds_df.columns
             assert f"{target_name}_pred" in preds_df.columns
+
+
+def _create_multitask_dataset_with_slide_table(
+    tmp_path: Path,
+    n_patients: int = 20,
+    feat_dim: int = 8,
+    n_tiles: int = 16,
+    target_names: list[str] | None = None,
+) -> tuple[Path, Path, Path, Path]:
+    """Create a dataset where feature files are in subfolders and named by slide ID.
+
+    Returns (clini_path, slide_path, feat_dir, output_dir).
+    Feature files are named ``SLIDE_xxxx.h5`` in subfolder ``encoder/``
+    and a slide table maps FILENAME → PATIENT.
+    """
+    if target_names is None:
+        target_names = ["target_A", "target_B"]
+
+    feat_dir = tmp_path / "feats"
+    feat_dir.mkdir()
+    encoder_dir = feat_dir / "encoder"
+    encoder_dir.mkdir()
+    clini_path = tmp_path / "clini.csv"
+    slide_path = tmp_path / "slide.csv"
+
+    clini_rows = []
+    slide_rows = []
+    for i in range(n_patients):
+        pid = f"PAT_{i:04d}"
+        slide_name = f"SLIDE_{i:04d}"
+        fname = f"encoder/{slide_name}.h5"
+        fpath = feat_dir / fname
+        with h5py.File(fpath, "w") as h5:
+            h5["feats"] = np.random.randn(n_tiles, feat_dim).astype(np.float32)
+            h5.attrs["stamp_version"] = "2.4.0"
+            h5.attrs["feat_type"] = "patient"
+        clini_row: dict[str, object] = {"PATIENT": pid}
+        for name in target_names:
+            clini_row[name] = float(np.random.uniform(-10, 10))
+        clini_rows.append(clini_row)
+        slide_rows.append({"PATIENT": pid, "FILENAME": fname})
+
+    pd.DataFrame(clini_rows).to_csv(clini_path, index=False)
+    pd.DataFrame(slide_rows).to_csv(slide_path, index=False)
+    return clini_path, slide_path, feat_dir, tmp_path / "output"
+
+
+@pytest.mark.slow
+def test_crossval_multitask_with_slide_table(tmp_path: Path) -> None:
+    """Feature files named by slide ID in subfolders, mapped via slide_table."""
+    Seed.set(42)
+    clini_path, slide_path, feat_dir, output_dir = (
+        _create_multitask_dataset_with_slide_table(tmp_path, n_patients=20)
+    )
+
+    config = MultitaskTrainingConfig(
+        output_dir=output_dir,
+        clini_table=clini_path,
+        slide_table=slide_path,
+        feature_dir=feat_dir,
+        patient_label="PATIENT",
+        filename_label="FILENAME",
+        target_labels={"target_A": 1, "target_B": 1},
+        emb_dim=16,
+        bag_size=8,
+        batch_size=4,
+        max_epochs=2,
+        patience=1,
+        accelerator="cpu",
+        seed=42,
+        crossval=MultitaskCrossvalConfig(
+            enabled=True,
+            n_splits=2,
+            shuffle=True,
+            random_state=42,
+        ),
+    )
+    crossval_multitask_(config)
+
+    for fold_i in range(2):
+        fold_dir = output_dir / f"fold_{fold_i}"
+        assert (fold_dir / "patient-preds.csv").exists()
+        preds_df = pd.read_csv(fold_dir / "patient-preds.csv")
+        assert len(preds_df) > 0
+        for target_name in config.target_labels:
+            assert f"{target_name}_true" in preds_df.columns
+            assert f"{target_name}_pred" in preds_df.columns

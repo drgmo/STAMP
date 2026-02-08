@@ -255,6 +255,42 @@ def _build_feature_index(feature_dir: Path) -> dict[str, Path]:
     return index
 
 
+def _build_patient_feature_map(
+    config: MultitaskTrainingConfig,
+) -> dict[str, list[Path]]:
+    """Build a mapping from patient ID to feature file paths.
+
+    When *slide_table* is provided, the FILENAME column (which may include
+    subfolder prefixes) is used to locate each patient's feature files.
+    Otherwise, a recursive glob of *feature_dir* is used, matching feature
+    file stems to patient IDs.
+    """
+    feature_dir = Path(config.feature_dir)
+
+    if config.slide_table is not None:
+        st = Path(config.slide_table)
+        read_fn = pd.read_excel if st.suffix == ".xlsx" else pd.read_csv
+        slide_df = read_fn(
+            st,
+            usecols=[config.patient_label, config.filename_label],
+            dtype=str,
+        )
+        patient_to_files: dict[str, list[Path]] = {}
+        for _, row in slide_df.iterrows():
+            pid = str(row[config.patient_label])
+            fname = str(row[config.filename_label])
+            # Append .h5 if not already present
+            if not fname.endswith(".h5"):
+                fname = fname + ".h5"
+            fpath = feature_dir / fname
+            patient_to_files.setdefault(pid, []).append(fpath)
+        return patient_to_files
+
+    # No slide table: match feature file stems to patient IDs
+    feat_index = _build_feature_index(feature_dir)
+    return {stem: [path] for stem, path in feat_index.items()}
+
+
 def _filter_valid_patients(
     *,
     patient_ids: Sequence[str],
@@ -269,20 +305,24 @@ def _filter_valid_patients(
         target_rows: corresponding target value rows.
     """
     target_names = list(config.target_labels.keys())
-    feature_dir = Path(config.feature_dir)
     clini_indexed = clini_df.set_index(config.patient_label)
 
-    # Build an index so we find .h5 files even inside subdirectories
-    feat_index = _build_feature_index(feature_dir)
+    # Build patient → feature file(s) mapping
+    patient_to_files = _build_patient_feature_map(config)
 
     valid_pids: list[str] = []
     feature_files: list[Path] = []
     target_rows: list[list[float]] = []
 
     for pid in patient_ids:
-        fpath = feat_index.get(pid)
-        if fpath is None:
+        fpaths = patient_to_files.get(pid)
+        if not fpaths:
             _logger.warning(f"Feature file not found for patient {pid}, skipping")
+            continue
+        # Use the first available feature file for this patient
+        fpath = next((f for f in fpaths if f.exists()), None)
+        if fpath is None:
+            _logger.warning(f"Feature file(s) missing on disk for patient {pid}, skipping")
             continue
         if pid not in clini_indexed.index:
             continue
