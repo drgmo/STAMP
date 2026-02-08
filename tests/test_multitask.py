@@ -25,8 +25,17 @@ def _create_multitask_dataset(
     n_patients: int = 30,
     feat_dim: int = 8,
     n_tiles: int = 16,
+    target_names: list[str] | None = None,
 ) -> tuple[Path, Path, Path]:
-    """Helper: create a synthetic multitask regression dataset."""
+    """Helper: create a synthetic multitask regression dataset.
+
+    Args:
+        target_names: column names for the regression targets.
+            Defaults to ``["target_A", "target_B"]``.
+    """
+    if target_names is None:
+        target_names = ["target_A", "target_B"]
+
     feat_dir = tmp_path / "feats"
     feat_dir.mkdir()
     clini_path = tmp_path / "clini.csv"
@@ -39,13 +48,10 @@ def _create_multitask_dataset(
             h5["feats"] = np.random.randn(n_tiles, feat_dim).astype(np.float32)
             h5.attrs["stamp_version"] = "2.4.0"
             h5.attrs["feat_type"] = "patient"
-        rows.append(
-            {
-                "PATIENT": pid,
-                "target_A": float(np.random.uniform(0, 100)),
-                "target_B": float(np.random.uniform(-1, 1)),
-            }
-        )
+        row: dict[str, object] = {"PATIENT": pid}
+        for name in target_names:
+            row[name] = float(np.random.uniform(-10, 10))
+        rows.append(row)
     pd.DataFrame(rows).to_csv(clini_path, index=False)
     return clini_path, feat_dir, tmp_path / "output"
 
@@ -224,3 +230,46 @@ def test_crossval_disabled_falls_back_to_single(tmp_path: Path) -> None:
     )
     crossval_multitask_(config)
     assert (output_dir / "model.ckpt").exists()
+
+
+@pytest.mark.slow
+def test_crossval_multitask_many_targets(tmp_path: Path) -> None:
+    """Verify that an arbitrary number of targets (>2) works end-to-end."""
+    Seed.set(42)
+    targets = ["scarHRD", "TMB", "CLOVAR_D", "CLOVAR_I", "CLOVAR_M"]
+    clini_path, feat_dir, output_dir = _create_multitask_dataset(
+        tmp_path, n_patients=20, target_names=targets
+    )
+
+    config = MultitaskTrainingConfig(
+        output_dir=output_dir,
+        clini_table=clini_path,
+        feature_dir=feat_dir,
+        patient_label="PATIENT",
+        target_labels={t: 1 for t in targets},
+        emb_dim=16,
+        bag_size=8,
+        batch_size=4,
+        max_epochs=2,
+        patience=1,
+        accelerator="cpu",
+        seed=42,
+        crossval=MultitaskCrossvalConfig(
+            enabled=True,
+            n_splits=2,
+            shuffle=True,
+            random_state=42,
+        ),
+    )
+    crossval_multitask_(config)
+
+    # Every fold must have patient-preds.csv with columns for all 5 targets
+    for fold_i in range(2):
+        fold_dir = output_dir / f"fold_{fold_i}"
+        assert (fold_dir / "patient-preds.csv").exists()
+        preds_df = pd.read_csv(fold_dir / "patient-preds.csv")
+        assert config.patient_label in preds_df.columns
+        for target_name in targets:
+            assert f"{target_name}_true" in preds_df.columns
+            assert f"{target_name}_pred" in preds_df.columns
+        assert len(preds_df) > 0
