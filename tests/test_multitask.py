@@ -177,6 +177,22 @@ def test_crossval_multitask(tmp_path: Path) -> None:
         assert (fold_dir / "model.ckpt").exists()
         assert (fold_dir / "fold_split.json").exists()
         assert (fold_dir / "metrics.json").exists()
+        assert (fold_dir / "patient-preds.csv").exists()
+
+        # Verify patient-preds.csv content
+        preds_df = pd.read_csv(fold_dir / "patient-preds.csv")
+        assert "PATIENT" in preds_df.columns
+        assert "target_A_true" in preds_df.columns
+        assert "target_A_pred" in preds_df.columns
+        assert "target_B_true" in preds_df.columns
+        assert "target_B_pred" in preds_df.columns
+        assert len(preds_df) > 0
+
+        # Verify predicted patients match the val set in the split
+        split = json.loads((fold_dir / "fold_split.json").read_text())
+        val_set = set(split["val_patients"])
+        pred_pids = set(preds_df["PATIENT"].tolist())
+        assert pred_pids.issubset(val_set), "Predictions contain patients not in val set!"
 
     # Verify no patient overlap between train/val in each fold
     for fold_i in range(2):

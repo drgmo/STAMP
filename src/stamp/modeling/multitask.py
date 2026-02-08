@@ -389,6 +389,84 @@ def _train_and_save(
     return dst
 
 
+def _predict_multitask(
+    *,
+    model: LitAttnMILMultiTask,
+    patient_ids: Sequence[str],
+    clini_df: pd.DataFrame,
+    config: MultitaskTrainingConfig,
+    output_path: Path,
+) -> None:
+    """Run inference on *patient_ids* and write ``patient-preds.csv``.
+
+    Columns: patient_label, <target>_true, <target>_pred  for each target.
+    """
+    target_names = list(config.target_labels.keys())
+
+    # Build a dataset with bag_size=None (use all tiles at inference)
+    ds = _build_dataset(
+        patient_ids=patient_ids,
+        clini_df=clini_df,
+        config=config,
+        bag_size=None,
+    )
+
+    worker_init = Seed.get_loader_worker_init() if Seed._is_set() else None
+    dl = DataLoader(
+        ds,
+        batch_size=1,
+        shuffle=False,
+        num_workers=config.num_workers,
+        worker_init_fn=worker_init,
+    )
+
+    model.eval()
+    device = next(model.parameters()).device
+
+    all_preds: list[dict[str, float]] = []
+    all_trues: list[dict[str, float]] = []
+
+    with torch.no_grad():
+        for feats, targets in dl:
+            feats = feats.to(device)
+            preds = model(feats)
+            pred_row = {
+                name: preds[name].squeeze().cpu().item() for name in target_names
+            }
+            true_row = {
+                name: targets[0, i].item() for i, name in enumerate(target_names)
+            }
+            all_preds.append(pred_row)
+            all_trues.append(true_row)
+
+    # Match patient IDs to dataset entries (skip patients that were filtered)
+    # _build_dataset filters patients without features or valid targets,
+    # so reconstruct the valid ID list in the same order.
+    clini_indexed = clini_df.set_index(config.patient_label)
+    feature_dir = Path(config.feature_dir)
+    valid_pids: list[str] = []
+    for pid in patient_ids:
+        fpath = feature_dir / f"{pid}.h5"
+        if not fpath.exists() or pid not in clini_indexed.index:
+            continue
+        try:
+            _ = [float(clini_indexed.loc[pid][t]) for t in target_names]
+        except (KeyError, ValueError):
+            continue
+        valid_pids.append(pid)
+
+    rows = []
+    for pid, true_row, pred_row in zip(valid_pids, all_trues, all_preds):
+        row: dict[str, object] = {config.patient_label: pid}
+        for name in target_names:
+            row[f"{name}_true"] = true_row[name]
+            row[f"{name}_pred"] = pred_row[name]
+        rows.append(row)
+
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    _logger.info("Saved patient predictions to %s", output_path)
+
+
 # ---------------------------------------------------------------------------
 # Public API: single train/val
 # ---------------------------------------------------------------------------
@@ -441,6 +519,7 @@ def crossval_multitask_(config: MultitaskTrainingConfig) -> None:
     Outputs per fold:
         - ``model.ckpt``
         - ``fold_split.json`` (train/val patient IDs)
+        - ``patient-preds.csv`` (per-target ground truth and predictions for val patients)
         - ``metrics.json`` (best validation loss)
 
     A ``crossval_summary.json`` is written at the end with aggregate
@@ -486,8 +565,8 @@ def crossval_multitask_(config: MultitaskTrainingConfig) -> None:
 
         fold_dir = output_dir / f"fold_{fold_i}"
 
-        if (fold_dir / "model.ckpt").exists():
-            _logger.info(f"Fold {fold_i}: checkpoint exists, skipping training")
+        if (fold_dir / "patient-preds.csv").exists():
+            _logger.info(f"Fold {fold_i}: patient-preds.csv exists, skipping")
             # Collect metrics if present
             mf = fold_dir / "metrics.json"
             if mf.exists():
@@ -513,22 +592,36 @@ def crossval_multitask_(config: MultitaskTrainingConfig) -> None:
             f"Fold {fold_i}/{n_splits}: train={len(train_pids)}, val={len(val_pids)}"
         )
 
-        train_dl, val_dl, feat_dim = _build_dataloaders(
-            train_pids=train_pids,
-            val_pids=val_pids,
-            clini_df=clini_df,
-            config=config,
-        )
-        total_steps = len(train_dl) * config.max_epochs
-        model = _create_model(config, total_steps, feat_dim)
+        # Train the model (skip if checkpoint already exists)
+        if not (fold_dir / "model.ckpt").exists():
+            train_dl, val_dl, feat_dim = _build_dataloaders(
+                train_pids=train_pids,
+                val_pids=val_pids,
+                clini_df=clini_df,
+                config=config,
+            )
+            total_steps = len(train_dl) * config.max_epochs
+            model = _create_model(config, total_steps, feat_dim)
 
-        _train_and_save(
-            model=model,
-            train_dl=train_dl,
-            val_dl=val_dl,
-            output_dir=fold_dir,
-            config=config,
-        )
+            _train_and_save(
+                model=model,
+                train_dl=train_dl,
+                val_dl=val_dl,
+                output_dir=fold_dir,
+                config=config,
+            )
+
+        # Generate patient-preds.csv for the validation set
+        best_ckpt = fold_dir / "model.ckpt"
+        if best_ckpt.exists():
+            best_model = LitAttnMILMultiTask.load_from_checkpoint(str(best_ckpt))
+            _predict_multitask(
+                model=best_model,
+                patient_ids=val_pids,
+                clini_df=clini_df,
+                config=config,
+                output_path=fold_dir / "patient-preds.csv",
+            )
 
         # Extract best val_loss from trainer logs
         best_val = float("inf")
