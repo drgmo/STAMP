@@ -251,11 +251,11 @@ def get_survival_thresholds(
 
 
 def assign_risk_groups(
-    risk_scores: Any,
+    risk_scores: npt.ArrayLike,
     threshold: float,
     *,
-    high_label: str = "HRDpos",
-    low_label: str = "HRDneg",
+    high_label: str = "high_risk",
+    low_label: str = "low_risk",
 ) -> np.ndarray:
     """Assign patients to high/low risk groups.
 

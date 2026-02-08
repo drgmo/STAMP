@@ -127,7 +127,7 @@ class TestAssignRiskGroups:
     def test_basic_split(self) -> None:
         scores = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
         groups = assign_risk_groups(scores, 0.5)
-        expected = np.array(["HRDneg", "HRDneg", "HRDneg", "HRDpos", "HRDpos"])
+        expected = np.array(["low_risk", "low_risk", "low_risk", "high_risk", "high_risk"])
         np.testing.assert_array_equal(groups, expected)
 
     def test_custom_labels(self) -> None:
@@ -140,7 +140,7 @@ class TestAssignRiskGroups:
     def test_boundary_goes_to_low(self) -> None:
         # Exactly at threshold → low risk (rule: > threshold → high)
         groups = assign_risk_groups([0.5], 0.5)
-        assert groups[0] == "HRDneg"
+        assert groups[0] == "low_risk"
 
 
 # ── evaluate_survival_stratification ───────────────────────────────────
