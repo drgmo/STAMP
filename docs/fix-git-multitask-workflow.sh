@@ -1,44 +1,68 @@
 #!/usr/bin/env bash
 # fix-git-multitask-workflow.sh
 #
-# Fixes the situation where feature work was done directly on the main branch
-# instead of a dedicated feature branch.
+# Reorganizes branches so that feature work lives on dedicated feature branches
+# instead of main. Then pushes the feature branches to your fork (origin).
 #
-# Prerequisites: You are on master/main with uncommitted (or recently committed)
-# multitask feature changes that should NOT be on main.
+# This script assumes:
+#   - 'origin' points to YOUR fork (e.g., github.com/drgmo/STAMP)
+#   - You may optionally have 'upstream' pointing to the lab's original repo
+#
+# Usage:
+#   chmod +x docs/fix-git-multitask-workflow.sh
+#   ./docs/fix-git-multitask-workflow.sh
 
 set -euo pipefail
 
-# --- Step 1: Save current state ---
-# Stage and commit any uncommitted changes on the main branch.
+echo "=== Step 1: Ensure we are on master ==="
 git checkout master
-git add -A
-git commit -m "feat: add multitask training branch support"
 
-# --- Step 2: Isolate the feature onto its own branch ---
-# Create feature/multitask pointing at the current commit (includes all feature work).
-# We stay on master so we can reset it in step 4.
-git branch feature/multitask
+# --- Step 2: Commit any uncommitted feature work ---
+if [ -n "$(git status --porcelain)" ]; then
+    echo "=== Step 2: Committing uncommitted changes ==="
+    git add -A
+    git commit -m "feat: add multitask training branch support"
+else
+    echo "=== Step 2: No uncommitted changes, skipping ==="
+fi
 
-# --- Step 3: Create the dependent branch for the next feature ---
-# feature/attention-export branches off feature/multitask because it depends on that code.
-git branch feature/attention-export feature/multitask
+# --- Step 3: Create feature branches (if they don't already exist) ---
+echo "=== Step 3: Creating feature branches ==="
+if git show-ref --verify --quiet refs/heads/feature/multitask; then
+    echo "  feature/multitask already exists, skipping"
+else
+    git branch feature/multitask
+    echo "  Created feature/multitask"
+fi
 
-# --- Step 4: Restore main to match the remote ---
-# Fetch latest remote state and hard-reset master to match origin/main.
-# The feature commits are preserved on feature/multitask and feature/attention-export.
+if git show-ref --verify --quiet refs/heads/feature/attention-export; then
+    echo "  feature/attention-export already exists, skipping"
+else
+    git branch feature/attention-export feature/multitask
+    echo "  Created feature/attention-export"
+fi
+
+# --- Step 4: Reset master to match origin/main ---
+echo "=== Step 4: Resetting master to origin/main ==="
 git fetch origin main
 git reset --hard origin/main
 
-# --- Verification ---
+# --- Step 5: Push feature branches to your fork ---
+echo "=== Step 5: Pushing feature branches to origin (your fork) ==="
+git push -u origin feature/multitask
+git push -u origin feature/attention-export
+
 echo ""
-echo "=== Verification ==="
+echo "=== Done! Verification ==="
 echo ""
 echo "master (should match origin/main):"
 git log --oneline master -3
 echo ""
-echo "feature/multitask (should include feature commits):"
+echo "feature/multitask:"
 git log --oneline feature/multitask -3
 echo ""
-echo "feature/attention-export (should match feature/multitask):"
+echo "feature/attention-export:"
 git log --oneline feature/attention-export -3
+echo ""
+echo "Remote branches on origin:"
+git branch -r | grep -E "feature/(multitask|attention-export)" || echo "  (none yet — push may have failed)"
