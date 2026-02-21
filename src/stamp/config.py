@@ -4,8 +4,11 @@ from stamp.encoding.config import PatientEncodingConfig, SlideEncodingConfig
 from stamp.heatmaps.config import HeatmapConfig
 from stamp.modeling.config import (
     AdvancedConfig,
+    AttentionExtractionConfig,
     CrossvalConfig,
     DeploymentConfig,
+    MultitaskCrossvalConfig,
+    MultitaskTrainConfig,
     TrainConfig,
 )
 from stamp.preprocessing.config import PreprocessingConfig
@@ -20,6 +23,11 @@ class StampConfig(BaseModel):
     training: TrainConfig | None = None
     crossval: CrossvalConfig | None = None
     deployment: DeploymentConfig | None = None
+
+    multitask_training: MultitaskTrainConfig | None = None
+    multitask_crossval: MultitaskCrossvalConfig | None = None
+
+    attention_extraction: AttentionExtractionConfig | None = None
 
     statistics: StatsConfig | None = None
 

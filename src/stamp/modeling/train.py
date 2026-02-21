@@ -218,11 +218,11 @@ def setup_model_for_training(
         )
     elif (
         feature_type in ("slide", "patient")
-        and advanced.model_name.value.lower() != "mlp"
+        and advanced.model_name.value.lower() not in ("mlp", "linear")
     ):
         raise ValueError(
-            f"Feature type '{feature_type}' only supports MLP backbones. "
-            f"Got '{advanced.model_name.value}'. Please set model_name='mlp'."
+            f"Feature type '{feature_type}' only supports MLP/Linear backbones. "
+            f"Got '{advanced.model_name.value}'. Please set model_name='mlp' or 'linear'."
         )
 
     # 4. Get model-specific hyperparameters

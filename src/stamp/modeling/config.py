@@ -54,6 +54,62 @@ class CrossvalConfig(TrainConfig):
     task: Task | None = Field(default="classification")
 
 
+class MultitaskTarget(BaseModel):
+    """Configuration for a single target in multitask training."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ground_truth_label: PandasLabel = Field(
+        description="Name of the column in the clinical table for this target."
+    )
+    task: Task = Field(
+        default="classification",
+        description="Task type for this target.",
+    )
+    categories: Sequence[Category] | None = Field(
+        default=None,
+        description="Categories for classification. Inferred if not set.",
+    )
+    weight: float = Field(
+        default=1.0,
+        description="Loss weight for this target (relative to other targets).",
+    )
+
+
+class MultitaskTrainConfig(BaseModel):
+    """Configuration for multitask training with multiple targets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    output_dir: Path = Field(description="The directory to save the results to")
+
+    clini_table: Path = Field(description="Excel or CSV to read clinical data from")
+    slide_table: Path | None = Field(
+        default=None, description="Excel or CSV to read patient-slide associations from"
+    )
+    feature_dir: Path = Field(description="Directory containing feature files")
+
+    targets: list[MultitaskTarget] = Field(
+        description="List of targets to train on simultaneously."
+    )
+
+    patient_label: PandasLabel = "PATIENT"
+    filename_label: PandasLabel = "FILENAME"
+
+    params_path: Path | None = Field(
+        default=None,
+        description="Optional: Path to a YAML file with advanced training parameters.",
+    )
+
+    use_vary_precision_transform: bool = False
+
+
+class MultitaskCrossvalConfig(MultitaskTrainConfig):
+    """Configuration for multitask cross-validation."""
+
+    n_splits: int = Field(5, ge=2)
+
+
 class DeploymentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,6 +130,36 @@ class DeploymentConfig(BaseModel):
 
     num_workers: int = min(os.cpu_count() or 1, 16)
     accelerator: str = "gpu" if torch.cuda.is_available() else "cpu"
+
+
+class AttentionExtractionConfig(BaseModel):
+    """Configuration for extracting attention scores from a trained model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    output_dir: Path = Field(
+        description="Directory to save attention score CSVs"
+    )
+    feature_dir: Path = Field(description="Directory containing feature files")
+    checkpoint_path: Path = Field(description="Path to model checkpoint file")
+
+    slide_table: Path | None = Field(
+        default=None,
+        description="Slide table for mapping slides to patients",
+    )
+    patient_label: PandasLabel = "PATIENT"
+    filename_label: PandasLabel = "FILENAME"
+
+    device: str = Field(
+        default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu",
+        description="Device to use for computation",
+    )
+
+    topk: int = Field(
+        default=0,
+        ge=0,
+        description="If > 0, only include the top-k tiles by attention score per slide.",
+    )
 
 
 class VitModelParams(BaseModel):
@@ -103,12 +189,19 @@ class LinearModelParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AttMILModelParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dim_hidden: int = 256
+    dropout: float = 0.25
+
+
 class ModelParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
     vit: VitModelParams = Field(default_factory=VitModelParams)
     trans_mil: TransMILModelParams = Field(default_factory=TransMILModelParams)
     mlp: MlpModelParams = Field(default_factory=MlpModelParams)
     linear: LinearModelParams = Field(default_factory=LinearModelParams)
+    attmil: AttMILModelParams = Field(default_factory=AttMILModelParams)
 
 
 class AdvancedConfig(BaseModel):

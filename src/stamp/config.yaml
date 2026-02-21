@@ -319,7 +319,7 @@ advanced_config:
   max_lr: 1e-4
   div_factor: 25. 
   # Select a model regardless of task
-  model_name: "vit" # or mlp, trans_mil
+  model_name: "vit" # or mlp, trans_mil, attmil
 
   model_params:
     vit: # Vision Transformer
@@ -338,3 +338,64 @@ advanced_config:
       dim_hidden: 512
       num_layers: 2
       dropout: 0.25
+
+    attmil: # Gated Attention MIL (Ilse et al. 2018)
+      dim_hidden: 256
+      dropout: 0.25
+
+
+# ---------- Multitask Training ----------
+# Train on multiple classification targets simultaneously with a shared backbone.
+# Uncomment and configure to use.
+
+#multitask_training:
+#  output_dir: "/path/to/save/files/to"
+#  clini_table: "/path/of/clini.csv"
+#  slide_table: "/path/of/slide.csv"
+#  feature_dir: "/path/your/extracted/features/are/stored/in"
+#
+#  targets:
+#    - ground_truth_label: "KRAS"
+#      task: "classification"
+#      categories: ["mutated", "wild type"]
+#      weight: 1.0
+#    - ground_truth_label: "TP53"
+#      task: "classification"
+#      categories: ["mutated", "wild type"]
+#      weight: 1.0
+#    - ground_truth_label: "MSI"
+#      task: "classification"
+#      # categories inferred from data if not specified
+#      weight: 1.0
+
+
+# ---------- Multitask Cross-validation ----------
+# Cross-validate a multitask model. Stratifies on the first target.
+
+#multitask_crossval:
+#  output_dir: "/path/to/save/files/to"
+#  clini_table: "/path/of/clini.csv"
+#  slide_table: "/path/of/slide.csv"
+#  feature_dir: "/path/your/extracted/features/are/stored/in"
+#  n_splits: 5
+#
+#  targets:
+#    - ground_truth_label: "KRAS"
+#      task: "classification"
+#      weight: 1.0
+#    - ground_truth_label: "TP53"
+#      task: "classification"
+#      weight: 1.0
+
+
+# ---------- Attention Score Extraction ----------
+# Extract per-tile attention scores from a trained model (supports attmil, vit, trans_mil).
+# Outputs a CSV per slide listing all tiles with their attention weights and coordinates.
+
+#attention_extraction:
+#  output_dir: "/path/to/save/attention/csvs"
+#  feature_dir: "/path/your/extracted/features/are/stored/in"
+#  checkpoint_path: "/path/to/model.ckpt"
+#  device: "cuda"
+#  # Number of top tiles to include in the summary CSV (0 = no summary)
+#  topk: 10

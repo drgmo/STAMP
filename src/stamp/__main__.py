@@ -249,6 +249,63 @@ def _run_cli(args: argparse.Namespace) -> None:
                 opacity=config.heatmaps.opacity,
             )
 
+        case "multitask_train":
+            from stamp.modeling.multitask import train_multitask_model_
+
+            if config.multitask_training is None:
+                raise ValueError("no multitask_training configuration supplied")
+
+            _add_file_handle_(
+                _logger, output_dir=config.multitask_training.output_dir
+            )
+            _logger.info(
+                "using the following configuration:\n"
+                f"{yaml.dump(config.multitask_training.model_dump(mode='json', exclude_none=True))}"
+            )
+            train_multitask_model_(
+                config=config.multitask_training,
+                advanced=config.advanced_config,
+            )
+
+        case "multitask_crossval":
+            from stamp.modeling.multitask import crossval_multitask_
+
+            if config.multitask_crossval is None:
+                raise ValueError("no multitask_crossval configuration supplied")
+
+            _add_file_handle_(
+                _logger, output_dir=config.multitask_crossval.output_dir
+            )
+            _logger.info(
+                "using the following configuration:\n"
+                f"{yaml.dump(config.multitask_crossval.model_dump(mode='json', exclude_none=True))}"
+            )
+            crossval_multitask_(
+                config=config.multitask_crossval,
+                advanced=config.advanced_config,
+            )
+
+        case "attention":
+            from stamp.modeling.attention import extract_attention_scores_
+
+            if config.attention_extraction is None:
+                raise ValueError("no attention_extraction configuration supplied")
+
+            _add_file_handle_(
+                _logger, output_dir=config.attention_extraction.output_dir
+            )
+            _logger.info(
+                "using the following configuration:\n"
+                f"{yaml.dump(config.attention_extraction.model_dump(mode='json', exclude_none=True))}"
+            )
+            extract_attention_scores_(
+                feature_dir=config.attention_extraction.feature_dir,
+                checkpoint_path=config.attention_extraction.checkpoint_path,
+                output_dir=config.attention_extraction.output_dir,
+                device=config.attention_extraction.device,
+                topk=config.attention_extraction.topk,
+            )
+
         case _:
             raise RuntimeError(
                 "unreachable: the argparser should only allow valid commands"
@@ -308,6 +365,18 @@ def main() -> None:
     )
     commands.add_parser("config", help="Print the loaded configuration")
     commands.add_parser("heatmaps", help="Generate heatmaps for a trained model")
+    commands.add_parser(
+        "multitask_train",
+        help="Train a model on multiple targets simultaneously",
+    )
+    commands.add_parser(
+        "multitask_crossval",
+        help="Cross-validate a multitask model on multiple targets",
+    )
+    commands.add_parser(
+        "attention",
+        help="Extract per-tile attention scores from a trained model",
+    )
 
     args = parser.parse_args()
 

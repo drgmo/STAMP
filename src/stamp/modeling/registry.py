@@ -21,6 +21,7 @@ class ModelName(StrEnum):
     MLP = "mlp"
     TRANS_MIL = "trans_mil"
     LINEAR = "linear"
+    ATTMIL = "attmil"
 
 
 # Map (feature_type, task) → correct Lightning wrapper class
@@ -37,8 +38,14 @@ MODEL_REGISTRY = {
 }
 
 
-def load_model_class(task: Task, feature_type: str, model_name: ModelName):
-    LitModelClass = MODEL_REGISTRY[(feature_type, task)]
+def load_model_class(task: str, feature_type: str, model_name: ModelName):
+    # Handle multitask models
+    if task == "multitask_classification":
+        from stamp.modeling.models.multitask import LitMultitaskTileClassifier
+
+        LitModelClass = LitMultitaskTileClassifier
+    else:
+        LitModelClass = MODEL_REGISTRY[(feature_type, task)]
 
     match model_name:
         case ModelName.VIT:
@@ -57,6 +64,11 @@ def load_model_class(task: Task, feature_type: str, model_name: ModelName):
         case ModelName.LINEAR:
             from stamp.modeling.models.mlp import (
                 Linear as ModelClass,
+            )
+
+        case ModelName.ATTMIL:
+            from stamp.modeling.models.attmil import (
+                AttentionMIL as ModelClass,
             )
 
         case _:
