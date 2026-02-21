@@ -406,17 +406,11 @@ class BagDataset(Dataset):
         self.bag_size = bag_size
         self.patients = self.slides["PATIENT"].unique().tolist()
 
-<<<<<<< Updated upstream
-    _: KW_ONLY
-    bags: Sequence[Iterable[FeaturePath | _BinaryIOLike]]
-    """The `.h5` files containing the bags.
-=======
     def _load_features(self, filename):
         path = f"{self.feature_dir}/{filename}"
         with h5py.File(path, "r") as f:
             X = f["feats"][:]  # STAMP-konform, ggf. key checken
         return X
->>>>>>> Stashed changes
 
     def __len__(self):
         return len(self.patients)
@@ -427,62 +421,9 @@ class BagDataset(Dataset):
         Xs = [self._load_features(fn) for fn in rows["FILENAME"].tolist()]
         X = np.concatenate(Xs, axis=0)  # (N, d)
 
-<<<<<<< Updated upstream
-    For bags containing more instances,
-    a random sample of `bag_size` instances will be drawn.
-    Smaller bags are padded with zeros.
-    If `bag_size` is None, all the samples will be used.
-    """
-
-    ground_truths: Float[Tensor, "index category_is_hot"] | Float[Tensor, "index 1"]
-
-    # ground_truths: Bool[Tensor, "index category_is_hot"]
-    # """The ground truth for each bag, one-hot encoded."""
-
-    transform: Callable[[Tensor], Tensor] | None
-
-    def __post_init__(self) -> None:
-        if len(self.bags) != len(self.ground_truths):
-            raise ValueError(
-                "the number of ground truths has to match the number of bags"
-            )
-
-    def __len__(self) -> int:
-        return len(self.bags)
-
-    def __getitem__(
-        self, index: int
-    ) -> tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]:
-        # Collect all the features
-        feats = []
-        coords_um = []
-        for bag_file in self.bags[index]:
-            with h5py.File(bag_file, "r") as h5:
-                if "feats" in h5:
-                    arr = h5["feats"][:]  # pyright: ignore[reportIndexIssue] # original STAMP files
-                else:
-                    arr = h5["patch_embeddings"][:]  # type: ignore # your Kronos files
-
-                feats.append(torch.from_numpy(arr))
-                coords_um.append(torch.from_numpy(get_coords(h5).coords_um))
-
-        feats = torch.concat(feats).float()
-        coords_um = torch.concat(coords_um).float()
-
-        if self.transform is not None:
-            feats = self.transform(feats)
-
-        # Sample a subset, if required
-        if self.bag_size is not None:
-            return (
-                *_to_fixed_size_bag(feats, coords=coords_um, bag_size=self.bag_size),
-                self.ground_truths[index],
-            )
-=======
         N = X.shape[0]
         if N >= self.bag_size:
             sel = np.random.choice(N, self.bag_size, replace=False)
->>>>>>> Stashed changes
         else:
             sel = np.random.choice(N, self.bag_size, replace=True)
         X = torch.from_numpy(X[sel]).float()  # (bag_size, d)
