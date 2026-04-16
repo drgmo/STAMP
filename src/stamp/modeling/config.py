@@ -48,6 +48,20 @@ class TrainConfig(BaseModel):
     # Experimental features
     use_vary_precision_transform: bool = False
 
+    # Heatmap-weighted features: weight each tile feature by its heatmap score
+    heatmap_dir: Path | None = Field(
+        default=None,
+        description="Directory with heatmap H5 files (e.g. direction/heatmap_data/). Enables feature weighting.",
+    )
+    heatmap_score_key: str = Field(
+        default="pos",
+        description="Which score to use: 'pos', 'neg', or a class label from /scores/{label}",
+    )
+    heatmap_normalize: str = Field(
+        default="minmax",
+        description="Score normalization for weighting: 'minmax' (→[0,1]) or 'raw'",
+    )
+
 
 class CrossvalConfig(TrainConfig):
     n_splits: int = Field(5, ge=2)

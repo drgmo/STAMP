@@ -99,6 +99,11 @@ crossval:
   # Change the precision of features during training
   #use_vary_precision_transform: true
 
+  # Heatmap-weighted features: weight each tile feature by its semantic heatmap
+  # score before training. Requires heatmap H5 files from WSIVL direction-benchmark.
+  #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
+  #heatmap_score_key: "pos"       # "pos", "neg", or a class label from /scores/{label}
+  #heatmap_normalize: "minmax"    # "minmax" (→[0,1]) or "raw"
 
 
 training:
@@ -152,6 +157,11 @@ training:
 
   # Change the precision of features during training
   #use_vary_precision_transform: true
+
+  # Heatmap-weighted features (same as crossval section above)
+  #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
+  #heatmap_score_key: "pos"
+  #heatmap_normalize: "minmax"
 
 
 deployment:
@@ -259,15 +269,15 @@ heatmaps:
 
 slide_encoding:
   # Encoder to use for slide encoding. Possible options are "cobra",
-  # "eagle", "titan", "gigapath", "chief", "prism", "madeleine".
+  # "eagle", "titan", "gigapath", "chief", "prism", "madeleine", "heatmap_topk".
   encoder: "chief"
-  
+
   # Directory to save the output files.
   output_dir: "/path/to/save/files/to"
-  
+
   # Directory where the extracted features are stored.
   feat_dir: "/path/your/extracted/features/are/stored/in"
-  
+
   # Device to run slide encoding on ("cpu", "cuda", "cuda:0", etc.)
   device: "cuda"
 
@@ -278,6 +288,13 @@ slide_encoding:
 
   # Add a hash of the entire preprocessing codebase in the feature folder name.
   #generate_hash: True
+
+  # HeatmapTopK encoder settings: select top-K tiles by semantic heatmap score,
+  # mean-pool their features into a slide-level embedding. Only used when
+  # encoder is set to "heatmap_topk".
+  #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
+  #heatmap_score_key: "pos"    # "pos", "neg", or class label from /scores/{label}
+  #heatmap_top_k: 25
 
 
 patient_encoding:

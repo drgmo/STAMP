@@ -14,6 +14,7 @@ class EncoderName(StrEnum):
     GIGAPATH = "gigapath"
     MADELEINE = "madeleine"
     PRISM = "prism"
+    HEATMAP_TOPK = "heatmap_topk"
 
 
 class SlideEncodingConfig(BaseModel, arbitrary_types_allowed=True):
@@ -25,6 +26,9 @@ class SlideEncodingConfig(BaseModel, arbitrary_types_allowed=True):
     device: DeviceLikeType
     agg_feat_dir: Path | None = None
     generate_hash: bool = True
+    heatmap_dir: Path | None = None
+    heatmap_score_key: str = "pos"
+    heatmap_top_k: int = 25
 
 
 class PatientEncodingConfig(BaseModel, arbitrary_types_allowed=True):
@@ -39,3 +43,6 @@ class PatientEncodingConfig(BaseModel, arbitrary_types_allowed=True):
     device: DeviceLikeType
     agg_feat_dir: Path | None = None
     generate_hash: bool = True
+    heatmap_dir: Path | None = None
+    heatmap_score_key: str = "pos"
+    heatmap_top_k: int = 25

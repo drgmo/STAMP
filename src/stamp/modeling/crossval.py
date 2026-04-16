@@ -225,6 +225,8 @@ def categorical_crossval_(
                 else None
             )
 
+            _hm_normalize = config.heatmap_normalize != "raw" if config.heatmap_dir else True
+
             train_dl, train_categories = create_dataloader(
                 feature_type=feature_type,
                 task=config.task,
@@ -235,6 +237,9 @@ def categorical_crossval_(
                 num_workers=advanced.num_workers,
                 transform=train_transform,
                 categories=fold_categories,
+                heatmap_dir=config.heatmap_dir,
+                heatmap_score_key=config.heatmap_score_key,
+                heatmap_normalize=_hm_normalize,
             )
             test_dl, _ = create_dataloader(
                 feature_type=feature_type,
@@ -246,6 +251,9 @@ def categorical_crossval_(
                 num_workers=advanced.num_workers,
                 transform=None,
                 categories=train_categories,
+                heatmap_dir=config.heatmap_dir,
+                heatmap_score_key=config.heatmap_score_key,
+                heatmap_normalize=_hm_normalize,
             )
 
             # Infer feature dimension
@@ -306,6 +314,9 @@ def categorical_crossval_(
                 num_workers=advanced.num_workers,
                 transform=None,
                 categories=categories,
+                heatmap_dir=config.heatmap_dir,
+                heatmap_score_key=config.heatmap_score_key,
+                heatmap_normalize=_hm_normalize,
             )
 
             predictions = _predict(

@@ -92,6 +92,9 @@ def tile_bag_dataloader(
     shuffle: bool,
     num_workers: int,
     transform: Callable[[Tensor], Tensor] | None,
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_normalize: bool = True,
 ) -> tuple[
     DataLoader[tuple[Bags, CoordinatesBatch, BagSizes, EncodedTargets]],
     Sequence[Category] | Mapping[str, Sequence[Category]],
@@ -105,6 +108,13 @@ def tile_bag_dataloader(
                 If `None`, classes are inferred from patient data.
         task='regression':
             returns float targets
+        heatmap_dir:
+            If set, tile features are weighted by heatmap scores from this
+            directory before bag sampling.
+        heatmap_score_key:
+            Which score to load from heatmap H5: "pos", "neg", or class label.
+        heatmap_normalize:
+            Whether to min-max normalise raw scores to [0, 1].
     """
 
     targets, cats_out = _parse_targets(
@@ -123,6 +133,9 @@ def tile_bag_dataloader(
         ground_truths=targets,
         transform=transform,
         deterministic=(not shuffle),
+        heatmap_dir=heatmap_dir,
+        heatmap_score_key=heatmap_score_key,
+        heatmap_normalize=heatmap_normalize,
     )
     dl = DataLoader(
         ds,
@@ -329,6 +342,9 @@ def create_dataloader(
     num_workers: int,
     transform: Callable[[Tensor], Tensor] | None,
     categories: Sequence[Category] | Mapping[str, Sequence[Category]] | None = None,
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_normalize: bool = True,
 ) -> tuple[DataLoader, Sequence[Category] | Mapping[str, Sequence[Category]]]:
     """Unified dataloader for all feature types and tasks."""
     if feature_type == "tile":
@@ -351,6 +367,9 @@ def create_dataloader(
             shuffle=shuffle,
             num_workers=num_workers,
             transform=transform,
+            heatmap_dir=heatmap_dir,
+            heatmap_score_key=heatmap_score_key,
+            heatmap_normalize=heatmap_normalize,
         )
     elif feature_type in {"slide", "patient"}:
         # For slide/patient-level: single feature vector per entry
@@ -559,6 +578,11 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
     transform: Callable[[Tensor], Tensor] | None
     deterministic: bool = False
 
+    # Heatmap-weighted features
+    heatmap_dir: Path | None = None
+    heatmap_score_key: str = "pos"
+    heatmap_normalize: bool = True
+
     def __post_init__(self) -> None:
         if len(self.bags) != len(self.ground_truths):
             raise ValueError(
@@ -634,6 +658,31 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
 
         if self.transform is not None:
             feats = self.transform(feats)
+
+        # Apply heatmap-based feature weighting
+        if self.heatmap_dir is not None:
+            from stamp.modeling.heatmap_scores import load_heatmap_scores
+
+            # Determine slide name from the first bag file
+            first_bag = next(iter(self.bags[index]))
+            slide_name = Path(str(first_bag)).stem
+
+            try:
+                scores = load_heatmap_scores(
+                    slide_name=slide_name,
+                    stamp_coords_um=coords_um.numpy(),
+                    heatmap_dir=self.heatmap_dir,
+                    score_key=self.heatmap_score_key,
+                    feature_h5_path=Path(str(first_bag)),
+                    normalize=self.heatmap_normalize,
+                )
+                weights = torch.from_numpy(scores).float().unsqueeze(-1)  # (N, 1)
+                feats = feats * weights  # (N, D) * (N, 1) → (N, D)
+            except (FileNotFoundError, KeyError, ValueError) as e:
+                _logger.warning(
+                    "Heatmap weighting failed for %s, using unweighted: %s",
+                    slide_name, e,
+                )
 
         # Sample a subset, if required
         if self.bag_size is not None:

@@ -17,6 +17,9 @@ def init_slide_encoder_(
     device: DeviceLikeType,
     agg_feat_dir: Path | None = None,
     generate_hash: bool = True,
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_top_k: int = 25,
 ) -> None:
     """
     Encode patch-level features to a single feature per slide using a given encoder.
@@ -69,6 +72,14 @@ def init_slide_encoder_(
 
             selected_encoder: Encoder = Prism()
 
+        case EncoderName.HEATMAP_TOPK:
+            from stamp.encoding.encoder.heatmap_topk import HeatmapTopK
+
+            selected_encoder: Encoder = HeatmapTopK(
+                k=heatmap_top_k,
+                score_key=heatmap_score_key,
+            )
+
         case Encoder():
             selected_encoder = encoder
 
@@ -81,6 +92,7 @@ def init_slide_encoder_(
         device=device,
         agg_feat_dir=agg_feat_dir,
         generate_hash=generate_hash,
+        heatmap_dir=heatmap_dir,
     )
 
 
@@ -94,6 +106,9 @@ def init_patient_encoder_(
     device: DeviceLikeType,
     agg_feat_dir: Path | None = None,
     generate_hash: bool = True,
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_top_k: int = 25,
 ) -> None:
     """
     Encode patch-level features to a single feature per patient using a given encoder.
@@ -155,6 +170,14 @@ def init_patient_encoder_(
 
             selected_encoder: Encoder = Prism()
 
+        case EncoderName.HEATMAP_TOPK:
+            from stamp.encoding.encoder.heatmap_topk import HeatmapTopK
+
+            selected_encoder: Encoder = HeatmapTopK(
+                k=heatmap_top_k,
+                score_key=heatmap_score_key,
+            )
+
         case Encoder():
             selected_encoder = encoder
 
@@ -170,4 +193,5 @@ def init_patient_encoder_(
         device=device,
         agg_feat_dir=agg_feat_dir,
         generate_hash=generate_hash,
+        heatmap_dir=heatmap_dir,
     )

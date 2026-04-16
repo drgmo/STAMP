@@ -119,6 +119,9 @@ def _run_cli(args: argparse.Namespace) -> None:
                 device=config.slide_encoding.device,
                 agg_feat_dir=config.slide_encoding.agg_feat_dir,
                 generate_hash=config.slide_encoding.generate_hash,
+                heatmap_dir=config.slide_encoding.heatmap_dir,
+                heatmap_score_key=config.slide_encoding.heatmap_score_key,
+                heatmap_top_k=config.slide_encoding.heatmap_top_k,
             )
 
         case "encode_patients":
@@ -142,6 +145,9 @@ def _run_cli(args: argparse.Namespace) -> None:
                 device=config.patient_encoding.device,
                 agg_feat_dir=config.patient_encoding.agg_feat_dir,
                 generate_hash=config.patient_encoding.generate_hash,
+                heatmap_dir=config.patient_encoding.heatmap_dir,
+                heatmap_score_key=config.patient_encoding.heatmap_score_key,
+                heatmap_top_k=config.patient_encoding.heatmap_top_k,
             )
 
         case "train":

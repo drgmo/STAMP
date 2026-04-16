@@ -68,6 +68,7 @@ def train_categorical_model_(
     _logger.info(f"Detected feature type: {feature_type}")
 
     # Train the model (the rest of the logic is unchanged)
+    _hm_normalize = config.heatmap_normalize != "raw" if config.heatmap_dir else True
     model, train_dl, valid_dl = setup_model_for_training(
         patient_to_data=patient_to_data,
         categories=config.categories,
@@ -85,6 +86,9 @@ def train_categorical_model_(
             else None
         ),
         feature_type=feature_type,
+        heatmap_dir=config.heatmap_dir,
+        heatmap_score_key=config.heatmap_score_key,
+        heatmap_normalize=_hm_normalize,
     )
     train_model_(
         output_dir=config.output_dir,
@@ -112,6 +116,10 @@ def setup_model_for_training(
     clini_table: Path,
     slide_table: Path | None,
     feature_dir: Path,
+    # Heatmap weighting
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_normalize: bool = True,
 ) -> tuple[
     lightning.LightningModule,
     DataLoader,
@@ -129,6 +137,9 @@ def setup_model_for_training(
             num_workers=advanced.num_workers,
             train_transform=train_transform,
             feature_type=feature_type,
+            heatmap_dir=heatmap_dir,
+            heatmap_score_key=heatmap_score_key,
+            heatmap_normalize=heatmap_normalize,
         )
     )
 
@@ -359,6 +370,9 @@ def setup_dataloaders_for_training(
     num_workers: int,
     train_transform: Callable[[torch.Tensor], torch.Tensor] | None,
     feature_type: str,
+    heatmap_dir: Path | None = None,
+    heatmap_score_key: str = "pos",
+    heatmap_normalize: bool = True,
 ) -> tuple[
     DataLoader,
     DataLoader,
@@ -460,6 +474,9 @@ def setup_dataloaders_for_training(
             num_workers=num_workers,
             transform=train_transform,
             categories=categories,
+            heatmap_dir=heatmap_dir,
+            heatmap_score_key=heatmap_score_key,
+            heatmap_normalize=heatmap_normalize,
         )
 
         valid_dl, _ = create_dataloader(
@@ -472,6 +489,9 @@ def setup_dataloaders_for_training(
             num_workers=num_workers,
             transform=None,
             categories=train_categories,
+            heatmap_dir=heatmap_dir,
+            heatmap_score_key=heatmap_score_key,
+            heatmap_normalize=heatmap_normalize,
         )
 
         # Infer feature dimension automatically
