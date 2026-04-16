@@ -32,9 +32,16 @@ def load_heatmap_scores(
         slide_name: Slide identifier (stem of the H5 file, without extension).
         stamp_coords_um: STAMP tile coordinates in micrometers, shape (N, 2).
         heatmap_dir: Directory containing heatmap H5 or .npy files.
-        score_key: Which score to read: ``"pos"``, ``"neg"``, or a class label
-            found under ``/scores/{label}`` in the heatmap H5.  For inline
-            masks this is the dataset name prefix under ``/tile/``.
+        score_key: Which score to read:
+
+            - ``"pos"``, ``"neg"`` — root-level datasets in the heatmap H5
+            - A class label found under ``/scores/{label}``
+            - ``"max_class"`` — per-tile maximum across **all** classes in
+              ``/scores/`` (plus ``/pos`` and ``/neg`` if present).  This
+              highlights diagnostically relevant tiles regardless of which
+              class they belong to.
+
+            For inline masks this is the dataset name prefix under ``/tile/``.
         feature_h5_path: Path to the STAMP feature H5 file (for inline mask
             fallback).
         normalize: If ``True``, normalise raw scores to [0, 1] via min-max.
@@ -46,7 +53,10 @@ def load_heatmap_scores(
 
     # --- 1. Direction-benchmark heatmap H5 ---
     if heatmap_dir is not None:
-        result = _load_direction_heatmap_h5(heatmap_dir, slide_name, score_key)
+        if score_key == "max_class":
+            result = _load_max_class_scores(heatmap_dir, slide_name)
+        else:
+            result = _load_direction_heatmap_h5(heatmap_dir, slide_name, score_key)
         if result is not None:
             scores, hm_x, hm_y = result
             aligned = _align_scores(stamp_coords_um, hm_x, hm_y, scores)
@@ -125,6 +135,55 @@ def _load_direction_heatmap_h5(
             )
 
     return scores, x, y
+
+
+def _load_max_class_scores(
+    heatmap_dir: Path,
+    slide_name: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Load all class scores and return per-tile maximum.
+
+    For each tile, takes ``max(score_class1, score_class2, ...)``.
+    This highlights diagnostically relevant tiles regardless of which class
+    they belong to — stroma and artifacts (low in all classes) get suppressed.
+    """
+    h5_path = heatmap_dir / f"{slide_name}.h5"
+    if not h5_path.exists():
+        return None
+
+    with h5py.File(str(h5_path), "r") as f:
+        if "x" not in f or "y" not in f:
+            _logger.warning("Heatmap H5 %s missing /x or /y datasets", h5_path)
+            return None
+
+        x = f["x"][:].astype(np.float64)
+        y = f["y"][:].astype(np.float64)
+
+        # Collect all available class scores
+        all_scores: list[np.ndarray] = []
+
+        # From /scores/ group
+        if "scores" in f:
+            for label in f["scores"]:
+                all_scores.append(f["scores"][label][:].astype(np.float32))
+
+        # From root /pos, /neg (if not already covered by /scores/)
+        if not all_scores:
+            for key in ("pos", "neg"):
+                if key in f:
+                    all_scores.append(f[key][:].astype(np.float32))
+
+        if not all_scores:
+            available = list(f.keys())
+            raise KeyError(
+                f"No class scores found in {h5_path}. Available keys: {available}"
+            )
+
+        # Per-tile maximum across all classes
+        stacked = np.stack(all_scores, axis=0)  # (n_classes, N)
+        max_scores = stacked.max(axis=0)  # (N,)
+
+    return max_scores, x, y
 
 
 def _load_inline_scores(

@@ -54,8 +54,11 @@ class TrainConfig(BaseModel):
         description="Directory with heatmap H5 files (e.g. direction/heatmap_data/). Enables feature weighting.",
     )
     heatmap_score_key: str = Field(
-        default="pos",
-        description="Which score to use: 'pos', 'neg', or a class label from /scores/{label}",
+        default="max_class",
+        description=(
+            "Which score to use: 'pos', 'neg', a class label from /scores/{label}, "
+            "or 'max_class' (per-tile max across all classes — recommended)"
+        ),
     )
     heatmap_normalize: str = Field(
         default="minmax",

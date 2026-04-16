@@ -27,7 +27,7 @@ class SlideEncodingConfig(BaseModel, arbitrary_types_allowed=True):
     agg_feat_dir: Path | None = None
     generate_hash: bool = True
     heatmap_dir: Path | None = None
-    heatmap_score_key: str = "pos"
+    heatmap_score_key: str = "max_class"
     heatmap_top_k: int = 25
 
 
@@ -44,5 +44,5 @@ class PatientEncodingConfig(BaseModel, arbitrary_types_allowed=True):
     agg_feat_dir: Path | None = None
     generate_hash: bool = True
     heatmap_dir: Path | None = None
-    heatmap_score_key: str = "pos"
+    heatmap_score_key: str = "max_class"
     heatmap_top_k: int = 25

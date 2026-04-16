@@ -102,8 +102,8 @@ crossval:
   # Heatmap-weighted features: weight each tile feature by its semantic heatmap
   # score before training. Requires heatmap H5 files from WSIVL direction-benchmark.
   #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
-  #heatmap_score_key: "pos"       # "pos", "neg", or a class label from /scores/{label}
-  #heatmap_normalize: "minmax"    # "minmax" (→[0,1]) or "raw"
+  #heatmap_score_key: "max_class"  # "max_class" (recommended), "pos", "neg", or class label
+  #heatmap_normalize: "minmax"     # "minmax" (→[0,1]) or "raw"
 
 
 training:
@@ -160,7 +160,7 @@ training:
 
   # Heatmap-weighted features (same as crossval section above)
   #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
-  #heatmap_score_key: "pos"
+  #heatmap_score_key: "max_class"  # "max_class" (recommended), "pos", "neg", or class label
   #heatmap_normalize: "minmax"
 
 
@@ -293,7 +293,7 @@ slide_encoding:
   # mean-pool their features into a slide-level embedding. Only used when
   # encoder is set to "heatmap_topk".
   #heatmap_dir: "/path/to/sembench_dir/run_.../direction/heatmap_data"
-  #heatmap_score_key: "pos"    # "pos", "neg", or class label from /scores/{label}
+  #heatmap_score_key: "max_class"  # "max_class" (recommended), "pos", "neg", or class label
   #heatmap_top_k: 25
 
 
