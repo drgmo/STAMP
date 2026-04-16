@@ -93,7 +93,7 @@ class HeatmapTopK(Encoder):
             slide_name = Path(tile_feats_filename).stem
             progress.set_description(slide_name)
 
-            output_path = (encode_dir / slide_name).with_suffix(".h5")
+            output_path = encode_dir / tile_feats_filename
             if output_path.exists():
                 _logger.debug(
                     "skipping %s because %s already exists", slide_name, output_path
