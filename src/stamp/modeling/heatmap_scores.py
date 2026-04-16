@@ -228,12 +228,14 @@ def _align_scores(
 ) -> np.ndarray:
     """Align heatmap scores to STAMP tile order by coordinate matching.
 
-    If coordinates already match (same source, same order), this is a fast
-    identity mapping.  Otherwise it builds a lookup from heatmap coordinates
-    and permutes the scores to match STAMP's tile order.
-
-    Uses the same approach as EAGLE's ``_align_vir2_to_ctp_by_coords``
-    (eagle.py:267-300).
+    Strategy:
+    1. If tile counts match exactly and coordinates are numerically close
+       (same source), return scores directly.
+    2. If tile counts match exactly but coordinates differ in unit (um vs px),
+       try to align by **spatial sort order** — both tilings scan the same WSI
+       in the same grid order, so sorting by (y, x) produces the same
+       tile sequence regardless of the coordinate unit.
+    3. Otherwise fall back to coordinate-based lookup (for partial overlaps).
     """
     n_stamp = stamp_coords_um.shape[0]
     n_hm = len(hm_x)
@@ -241,10 +243,32 @@ def _align_scores(
     # Build heatmap coord pairs
     hm_coords = np.stack([hm_x, hm_y], axis=1)  # (M, 2)
 
-    # Quick check: if shapes match and coords are close, assume same order
+    # --- Fast path: same count + same coordinates → direct copy ---
     if n_stamp == n_hm:
         if np.allclose(stamp_coords_um, hm_coords, atol=1.0, rtol=0):
             return scores.copy()
+
+        # --- Same count but different units (um vs px) ---
+        # Both tile the same WSI in a regular grid. Sorting by (y, x) produces
+        # the same spatial order regardless of the coordinate unit.
+        stamp_order = np.lexsort((stamp_coords_um[:, 0], stamp_coords_um[:, 1]))
+        hm_order = np.lexsort((hm_coords[:, 0], hm_coords[:, 1]))
+
+        # Map: stamp_order[i] should get the score from hm_order[i]
+        aligned = np.empty(n_stamp, dtype=np.float32)
+        aligned[stamp_order] = scores[hm_order]
+
+        _logger.debug(
+            "Aligned %d heatmap scores to STAMP tiles via spatial sort order",
+            n_stamp,
+        )
+        return aligned
+
+    # --- Different tile counts: coordinate-based lookup ---
+    _logger.info(
+        "Tile count mismatch (STAMP=%d, heatmap=%d), using coordinate lookup",
+        n_stamp, n_hm,
+    )
 
     # Round to avoid floating-point mismatches
     decimals = 1
