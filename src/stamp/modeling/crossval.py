@@ -290,6 +290,7 @@ def categorical_crossval_(
                 max_epochs=advanced.max_epochs,
                 patience=advanced.patience,
                 accelerator=advanced.accelerator,
+                checkpoint_metric=advanced.checkpoint_metric,
             )
         else:
             if feature_type == "tile":

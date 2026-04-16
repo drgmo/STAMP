@@ -98,6 +98,7 @@ def train_categorical_model_(
         max_epochs=advanced.max_epochs,
         patience=advanced.patience,
         accelerator=advanced.accelerator,
+        checkpoint_metric=advanced.checkpoint_metric,
     )
 
 
@@ -519,6 +520,15 @@ def setup_dataloaders_for_training(
         )
 
 
+_METRIC_MODE: dict[str, str] = {
+    "validation_loss": "min",
+    "validation_auroc": "max",
+    "validation_mae": "min",
+    "val_cox_loss": "min",
+    "val_cindex": "max",
+}
+
+
 def train_model_(
     *,
     output_dir: Path,
@@ -528,20 +538,30 @@ def train_model_(
     max_epochs: int,
     patience: int,
     accelerator: str | Accelerator,
+    checkpoint_metric: str | None = None,
 ) -> lightning.LightningModule:
     """Trains a model.
 
     Returns:
-        The model with the best validation loss during training.
+        The model with the best validation metric during training.
     """
     torch.set_float32_matmul_precision("high")
 
-    # Decide monitor metric based on task
-    task = getattr(model.hparams, "task", None)
-    if task == "survival":
-        monitor_metric, mode = "val_cindex", "max"
-    else:  # regression or classification
-        monitor_metric, mode = "validation_loss", "min"
+    # Decide monitor metric based on task (or use user override)
+    if checkpoint_metric is not None:
+        if checkpoint_metric not in _METRIC_MODE:
+            raise ValueError(
+                f"Unknown checkpoint_metric '{checkpoint_metric}'. "
+                f"Available metrics: {sorted(_METRIC_MODE)}"
+            )
+        monitor_metric = checkpoint_metric
+        mode = _METRIC_MODE[checkpoint_metric]
+    else:
+        task = getattr(model.hparams, "task", None)
+        if task == "survival":
+            monitor_metric, mode = "val_cindex", "max"
+        else:  # regression or classification
+            monitor_metric, mode = "validation_loss", "min"
 
     model_checkpoint = ModelCheckpoint(
         monitor=monitor_metric,
