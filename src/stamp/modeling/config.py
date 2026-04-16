@@ -149,3 +149,15 @@ class AdvancedConfig(BaseModel):
     )
     model_params: ModelParams
     seed: int | None = None
+    checkpoint_metric: str | None = Field(
+        default=None,
+        description=(
+            "Metric to monitor for checkpoint selection and early stopping. "
+            "If not set, defaults to 'validation_loss' for classification/regression "
+            "and 'val_cindex' for survival. "
+            "Available metrics per task — "
+            "classification: 'validation_loss', 'validation_auroc'; "
+            "regression: 'validation_loss', 'validation_mae'; "
+            "survival: 'val_cox_loss', 'val_cindex'."
+        ),
+    )

@@ -325,6 +325,15 @@ advanced_config:
   # Determines the initial learning rate via initial_lr = max_lr/div_factor
   max_lr: 1e-4
   div_factor: 25. 
+  # Metric to monitor for checkpoint selection and early stopping.
+  # If not set, defaults to "validation_loss" for classification/regression
+  # and "val_cindex" for survival.
+  # Available metrics per task:
+  #   classification: "validation_loss", "validation_auroc"
+  #   regression: "validation_loss", "validation_mae"
+  #   survival: "val_cox_loss", "val_cindex"
+  #checkpoint_metric: "validation_auroc"
+
   # Select a model regardless of task
   model_name: "vit" # or mlp, linear, trans_mil, barspoon
 
