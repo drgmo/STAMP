@@ -5,6 +5,13 @@ Supports three score sources (checked in order):
    with /x, /y, /pos, /neg, /scores/{label}
 2. Inline masks in STAMP feature H5 files (/tile/{mask_name})
 3. External .npy sidecar files ({heatmap_dir}/{slide_name}.npy)
+
+Coordinate handling:
+    STAMP stores tile coordinates in **micrometers**.  WSIVL heatmap H5 files
+    may store coordinates in **level-0 pixels** (when WSIVL was pointed at its
+    own embedding H5 files rather than STAMP feature files).  This module
+    auto-detects the unit mismatch by comparing tile strides and converts
+    pixel coordinates to micrometers using the MPP from STAMP metadata.
 """
 
 import logging
@@ -21,6 +28,8 @@ def load_heatmap_scores(
     *,
     slide_name: str,
     stamp_coords_um: np.ndarray,
+    tile_size_um: float,
+    tile_size_px: int | None = None,
     heatmap_dir: Path | None = None,
     score_key: str = "pos",
     feature_h5_path: Path | None = None,
@@ -31,6 +40,9 @@ def load_heatmap_scores(
     Args:
         slide_name: Slide identifier (stem of the H5 file, without extension).
         stamp_coords_um: STAMP tile coordinates in micrometers, shape (N, 2).
+        tile_size_um: Tile size in micrometers (from STAMP H5 metadata).
+        tile_size_px: Tile size in pixels (from STAMP H5 metadata).  Required
+            for automatic pixel-to-micrometer conversion.
         heatmap_dir: Directory containing heatmap H5 or .npy files.
         score_key: Which score to read:
 
@@ -59,7 +71,11 @@ def load_heatmap_scores(
             result = _load_direction_heatmap_h5(heatmap_dir, slide_name, score_key)
         if result is not None:
             scores, hm_x, hm_y = result
-            aligned = _align_scores(stamp_coords_um, hm_x, hm_y, scores)
+            aligned = _align_scores(
+                stamp_coords_um, hm_x, hm_y, scores,
+                tile_size_um=tile_size_um,
+                tile_size_px=tile_size_px,
+            )
             return _normalize(aligned) if normalize else aligned
 
     # --- 2. Inline mask in STAMP H5 ---
@@ -220,60 +236,115 @@ def _load_npy_scores(
 # Coordinate alignment
 # ---------------------------------------------------------------------------
 
+def _detect_and_convert_coords(
+    stamp_coords_um: np.ndarray,
+    hm_x: np.ndarray,
+    hm_y: np.ndarray,
+    tile_size_um: float,
+    tile_size_px: int | None,
+) -> np.ndarray:
+    """Detect if heatmap coordinates are in pixels and convert to micrometers.
+
+    Detection logic:
+        Compute the median tile stride (spacing between adjacent tiles) in both
+        coordinate systems.  STAMP's stride should be close to ``tile_size_um``.
+        If the heatmap stride is close to ``tile_size_px`` instead, the heatmap
+        coordinates are in level-0 pixels and need conversion via MPP.
+
+    Returns:
+        (M, 2) float64 array of heatmap coordinates in **micrometers**.
+    """
+    hm_coords = np.stack([hm_x, hm_y], axis=1)  # (M, 2)
+
+    # Compute heatmap tile stride from coordinate spacing
+    hm_stride = _estimate_stride(hm_x, hm_y)
+    stamp_stride = _estimate_stride(
+        stamp_coords_um[:, 0], stamp_coords_um[:, 1],
+    )
+
+    if hm_stride is None or stamp_stride is None:
+        # Single tile or unable to determine — assume same unit
+        return hm_coords
+
+    # Check if heatmap stride matches STAMP stride (both in um)
+    if abs(hm_stride - stamp_stride) / max(stamp_stride, 1e-8) < 0.1:
+        _logger.debug("Heatmap coords appear to be in micrometers (stride=%.1f)", hm_stride)
+        return hm_coords
+
+    # Check if heatmap stride matches tile_size_px (coords in pixels)
+    if tile_size_px is not None and tile_size_px > 0:
+        if abs(hm_stride - tile_size_px) / max(tile_size_px, 1e-8) < 0.1:
+            mpp = tile_size_um / tile_size_px
+            _logger.info(
+                "Heatmap coords detected as level-0 pixels (stride=%.0f px, "
+                "tile_size_px=%d). Converting to micrometers with MPP=%.4f",
+                hm_stride, tile_size_px, mpp,
+            )
+            return hm_coords * mpp
+
+    # Fallback: try to infer conversion factor from stride ratio
+    ratio = stamp_stride / hm_stride
+    # If ratio is close to a plausible MPP (0.1 - 10.0), use it
+    if 0.05 < ratio < 20.0 and abs(ratio - 1.0) > 0.1:
+        _logger.info(
+            "Heatmap coords appear to use different units (stride=%.1f vs "
+            "STAMP=%.1f). Converting with inferred factor=%.4f",
+            hm_stride, stamp_stride, ratio,
+        )
+        return hm_coords * ratio
+
+    return hm_coords
+
+
+def _estimate_stride(x: np.ndarray, y: np.ndarray) -> float | None:
+    """Estimate the tile stride from coordinate arrays.
+
+    Returns the median spacing between adjacent unique coordinate values,
+    or ``None`` if there are fewer than 2 unique values in both axes.
+    """
+    diffs = []
+    for vals in (x, y):
+        unique = np.sort(np.unique(vals))
+        if len(unique) >= 2:
+            diffs.append(np.median(np.diff(unique)))
+    if not diffs:
+        return None
+    return float(np.min(diffs))
+
+
 def _align_scores(
     stamp_coords_um: np.ndarray,
     hm_x: np.ndarray,
     hm_y: np.ndarray,
     scores: np.ndarray,
+    *,
+    tile_size_um: float,
+    tile_size_px: int | None,
 ) -> np.ndarray:
     """Align heatmap scores to STAMP tile order by coordinate matching.
 
-    Strategy:
-    1. If tile counts match exactly and coordinates are numerically close
-       (same source), return scores directly.
-    2. If tile counts match exactly but coordinates differ in unit (um vs px),
-       try to align by **spatial sort order** — both tilings scan the same WSI
-       in the same grid order, so sorting by (y, x) produces the same
-       tile sequence regardless of the coordinate unit.
-    3. Otherwise fall back to coordinate-based lookup (for partial overlaps).
+    Automatically detects if heatmap coordinates are in pixels and converts
+    them to micrometers before matching.
     """
-    n_stamp = stamp_coords_um.shape[0]
-    n_hm = len(hm_x)
-
-    # Build heatmap coord pairs
-    hm_coords = np.stack([hm_x, hm_y], axis=1)  # (M, 2)
-
-    # --- Fast path: same count + same coordinates → direct copy ---
-    if n_stamp == n_hm:
-        if np.allclose(stamp_coords_um, hm_coords, atol=1.0, rtol=0):
-            return scores.copy()
-
-        # --- Same count but different units (um vs px) ---
-        # Both tile the same WSI in a regular grid. Sorting by (y, x) produces
-        # the same spatial order regardless of the coordinate unit.
-        stamp_order = np.lexsort((stamp_coords_um[:, 0], stamp_coords_um[:, 1]))
-        hm_order = np.lexsort((hm_coords[:, 0], hm_coords[:, 1]))
-
-        # Map: stamp_order[i] should get the score from hm_order[i]
-        aligned = np.empty(n_stamp, dtype=np.float32)
-        aligned[stamp_order] = scores[hm_order]
-
-        _logger.debug(
-            "Aligned %d heatmap scores to STAMP tiles via spatial sort order",
-            n_stamp,
-        )
-        return aligned
-
-    # --- Different tile counts: coordinate-based lookup ---
-    _logger.info(
-        "Tile count mismatch (STAMP=%d, heatmap=%d), using coordinate lookup",
-        n_stamp, n_hm,
+    # Step 1: detect unit and convert heatmap coords to micrometers
+    hm_coords_um = _detect_and_convert_coords(
+        stamp_coords_um, hm_x, hm_y,
+        tile_size_um=tile_size_um,
+        tile_size_px=tile_size_px,
     )
 
-    # Round to avoid floating-point mismatches
-    decimals = 1
+    n_stamp = stamp_coords_um.shape[0]
+    n_hm = hm_coords_um.shape[0]
+
+    # Step 2: fast path — same count + coordinates match after conversion
+    if n_stamp == n_hm:
+        if np.allclose(stamp_coords_um, hm_coords_um, atol=1.0, rtol=0):
+            return scores.copy()
+
+    # Step 3: coordinate-based lookup with tolerance
+    decimals = 0  # round to nearest integer micrometer
     ref = np.round(stamp_coords_um.astype(np.float64), decimals)
-    oth = np.round(hm_coords.astype(np.float64), decimals)
+    oth = np.round(hm_coords_um.astype(np.float64), decimals)
 
     # Build mapping: coordinate -> queue of indices (from heatmap)
     buckets: dict[tuple, deque] = defaultdict(deque)
@@ -290,9 +361,10 @@ def _align_scores(
     if matched == 0:
         raise ValueError(
             f"No coordinate matches found between STAMP ({n_stamp} tiles) and "
-            f"heatmap ({n_hm} tiles). Coordinates may use different units "
-            f"(STAMP: um, heatmap: px). Check that WSIVL h5_dir pointed to "
-            f"STAMP feature files."
+            f"heatmap ({n_hm} tiles) after unit conversion. "
+            f"STAMP stride ≈ {_estimate_stride(stamp_coords_um[:, 0], stamp_coords_um[:, 1]):.1f}, "
+            f"heatmap stride ≈ {_estimate_stride(hm_x, hm_y):.1f}. "
+            f"tile_size_um={tile_size_um}, tile_size_px={tile_size_px}."
         )
 
     if matched < n_stamp:
@@ -302,6 +374,8 @@ def _align_scores(
             matched, n_stamp,
         )
         aligned_scores = np.nan_to_num(aligned_scores, nan=0.0)
+    else:
+        _logger.debug("Heatmap alignment: all %d tiles matched.", n_stamp)
 
     return aligned_scores
 

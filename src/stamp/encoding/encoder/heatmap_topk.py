@@ -111,6 +111,8 @@ class HeatmapTopK(Encoder):
                 scores = load_heatmap_scores(
                     slide_name=slide_name,
                     stamp_coords_um=coords_info.coords_um,
+                    tile_size_um=float(coords_info.tile_size_um),
+                    tile_size_px=int(coords_info.tile_size_px) if coords_info.tile_size_px else None,
                     heatmap_dir=heatmap_dir,
                     score_key=self.score_key,
                     feature_h5_path=Path(h5_path),
@@ -182,6 +184,8 @@ class HeatmapTopK(Encoder):
                     scores = load_heatmap_scores(
                         slide_name=slide_name,
                         stamp_coords_um=coords_info.coords_um,
+                        tile_size_um=float(coords_info.tile_size_um),
+                        tile_size_px=int(coords_info.tile_size_px) if coords_info.tile_size_px else None,
                         heatmap_dir=heatmap_dir,
                         score_key=self.score_key,
                         feature_h5_path=Path(h5_path),

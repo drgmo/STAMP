@@ -651,7 +651,8 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
                 arr = embeddings_obj[()]  # your Kronos files
 
             feats.append(torch.from_numpy(arr))
-            coords_um.append(torch.from_numpy(get_coords(h5).coords_um))
+            coords_info = get_coords(h5)
+            coords_um.append(torch.from_numpy(coords_info.coords_um))
 
         feats = torch.concat(feats).float()
         coords_um = torch.concat(coords_um).float()
@@ -671,6 +672,8 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
                 scores = load_heatmap_scores(
                     slide_name=slide_name,
                     stamp_coords_um=coords_um.numpy(),
+                    tile_size_um=float(coords_info.tile_size_um),
+                    tile_size_px=int(coords_info.tile_size_px) if coords_info.tile_size_px else None,
                     heatmap_dir=self.heatmap_dir,
                     score_key=self.heatmap_score_key,
                     feature_h5_path=Path(str(first_bag)),
