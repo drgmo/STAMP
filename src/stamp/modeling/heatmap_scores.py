@@ -358,22 +358,26 @@ def _align_scores(
             aligned_scores[i] = scores[buckets[key].popleft()]
             matched += 1
 
-    if matched == 0:
-        raise ValueError(
-            f"No coordinate matches found between STAMP ({n_stamp} tiles) and "
-            f"heatmap ({n_hm} tiles) after unit conversion. "
-            f"STAMP stride ≈ {_estimate_stride(stamp_coords_um[:, 0], stamp_coords_um[:, 1]):.1f}, "
-            f"heatmap stride ≈ {_estimate_stride(hm_x, hm_y):.1f}. "
-            f"tile_size_um={tile_size_um}, tile_size_px={tile_size_px}."
-        )
+    # Partial match: unmatched STAMP tiles get score=0 (suppressed)
+    aligned_scores = np.nan_to_num(aligned_scores, nan=0.0)
 
-    if matched < n_stamp:
+    if matched == 0:
+        _logger.warning(
+            "Heatmap alignment: 0/%d STAMP tiles matched for this slide. "
+            "All tiles get score=0. "
+            "STAMP stride ≈ %s, heatmap stride ≈ %s, "
+            "tile_size_um=%.1f, tile_size_px=%s.",
+            n_stamp,
+            _estimate_stride(stamp_coords_um[:, 0], stamp_coords_um[:, 1]),
+            _estimate_stride(hm_x, hm_y),
+            tile_size_um, tile_size_px,
+        )
+    elif matched < n_stamp:
         _logger.warning(
             "Heatmap alignment: %d/%d STAMP tiles matched. "
-            "Unmatched tiles get score=0.",
-            matched, n_stamp,
+            "%d unmatched tiles get score=0.",
+            matched, n_stamp, n_stamp - matched,
         )
-        aligned_scores = np.nan_to_num(aligned_scores, nan=0.0)
     else:
         _logger.debug("Heatmap alignment: all %d tiles matched.", n_stamp)
 
