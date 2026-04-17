@@ -182,6 +182,27 @@ def _compute_multitarget_classification_stats(
         target_labels=target_labels,
     )
 
+    # Extended metrics + calibration + OOF for each target
+    from stamp.statistics.extended_categorical import compute_extended_stats_
+    from stamp.statistics.calibration import compute_calibration_stats_
+    from stamp.statistics.oof import compute_oof_stats_
+    for target_label in target_labels:
+        compute_extended_stats_(
+            preds_csvs=pred_csvs,
+            outpath=output_dir,
+            ground_truth_label=target_label,
+        )
+        compute_calibration_stats_(
+            preds_csvs=pred_csvs,
+            outpath=output_dir,
+            ground_truth_label=target_label,
+        )
+        compute_oof_stats_(
+            preds_csvs=pred_csvs,
+            outpath=output_dir,
+            ground_truth_label=target_label,
+        )
+
 
 def compute_stats_(
     *,
@@ -321,6 +342,37 @@ def compute_stats_(
                     preds_csvs=pred_csvs,
                     ground_truth_label=ground_truth_label,
                     outpath=output_dir,
+                )
+
+                # Extended metrics: macro/weighted AUROC/F1/AP, balanced accuracy,
+                # per-class precision/recall, MCC, Cohen's kappa, log loss,
+                # confusion matrix, fold class distributions.
+                from stamp.statistics.extended_categorical import (
+                    compute_extended_stats_,
+                )
+                compute_extended_stats_(
+                    preds_csvs=pred_csvs,
+                    outpath=output_dir,
+                    ground_truth_label=ground_truth_label,
+                )
+
+                # Calibration: Brier, ECE, MCE, reliability diagrams
+                from stamp.statistics.calibration import (
+                    compute_calibration_stats_,
+                )
+                compute_calibration_stats_(
+                    preds_csvs=pred_csvs,
+                    outpath=output_dir,
+                    ground_truth_label=ground_truth_label,
+                )
+
+                # OOF aggregation: concatenate all fold predictions and
+                # compute global metrics
+                from stamp.statistics.oof import compute_oof_stats_
+                compute_oof_stats_(
+                    preds_csvs=pred_csvs,
+                    outpath=output_dir,
+                    ground_truth_label=ground_truth_label,
                 )
 
         case "regression":
