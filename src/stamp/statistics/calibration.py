@@ -121,7 +121,7 @@ def _compute_calibration_for_fold(
 
 
 def _plot_reliability_diagram(
-    per_class_details: dict[str, dict[str, dict]],
+    per_class_details: dict,
     categories: Sequence[str],
     output_path: Path,
     title: str,

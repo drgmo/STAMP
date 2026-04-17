@@ -308,6 +308,10 @@ def _read_pred_csv(
     categories = [c[len(target_label) + 1:] for c in prob_cols]
     y_true = df[target_label].to_numpy()
     y_pred_probs = df[prob_cols].astype(float).to_numpy()
+    # Renormalize so rows sum to 1 (fixes float precision rounding)
+    row_sums = y_pred_probs.sum(axis=1, keepdims=True)
+    row_sums = np.where(row_sums > 0, row_sums, 1.0)
+    y_pred_probs = y_pred_probs / row_sums
     return y_true, y_pred_probs, categories
 
 
