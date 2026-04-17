@@ -190,6 +190,15 @@ def categorical_crossval_(
                 "config.task must be set to 'classification' | 'regression' | 'survival'"
             )
 
+        # Diagnostics directory for this split (used by dataloaders below)
+        if config.heatmap_dir:
+            if config.heatmap_diagnostics_dir:
+                _diag_dir = config.heatmap_diagnostics_dir / f"split-{split_i}"
+            else:
+                _diag_dir = split_dir / "heatmap_diagnostics"
+        else:
+            _diag_dir = None
+
         # Train the model
         if not (split_dir / "model.ckpt").exists():
             # Build train and test dataloaders directly (pure 2-way k-fold split)
@@ -226,8 +235,6 @@ def categorical_crossval_(
             )
 
             _hm_normalize = config.heatmap_normalize != "raw" if config.heatmap_dir else True
-            # Write diagnostics only for the first fold to avoid duplicate CSVs
-            _diag_dir = config.heatmap_diagnostics_dir if split_i == 0 else None
 
             train_dl, train_categories = create_dataloader(
                 feature_type=feature_type,
@@ -384,10 +391,10 @@ def categorical_crossval_(
                     ground_truth_label=config.ground_truth_label,
                 ).to_csv(split_dir / "patient-preds.csv", index=False)
 
-    # Write alignment summary after all folds
-    if config.heatmap_diagnostics_dir:
-        from stamp.modeling.heatmap_scores import write_alignment_summary
-        write_alignment_summary(config.heatmap_diagnostics_dir)
+        # Write alignment summary for this split
+        if _diag_dir is not None:
+            from stamp.modeling.heatmap_scores import write_alignment_summary
+            write_alignment_summary(_diag_dir)
 
 
 def _get_splits(

@@ -66,7 +66,12 @@ class TrainConfig(BaseModel):
     )
     heatmap_diagnostics_dir: Path | None = Field(
         default=None,
-        description="If set, write per-slide alignment CSVs showing matched/unmatched tiles.",
+        description=(
+            "Optional root directory for per-slide alignment CSVs showing "
+            "matched/unmatched tiles. If not set, diagnostics are written "
+            "into {output_dir}/split-{i}/heatmap_diagnostics/ automatically. "
+            "If set, diagnostics go into {heatmap_diagnostics_dir}/split-{i}/."
+        ),
     )
 
 

@@ -446,20 +446,20 @@ def _write_diagnostics(
         writer = csv.writer(f)
         writer.writerow([
             "tile_idx", "stamp_x_um", "stamp_y_um",
-            "matched", "hm_x_um", "hm_y_um", "score",
+            "hm_x_um", "hm_y_um", "matched", "score",
         ])
         for i in range(len(stamp_coords)):
             if matched_mask[i] and matched_hm_indices is not None and matched_hm_indices[i] >= 0:
                 j = matched_hm_indices[i]
                 writer.writerow([
                     i, f"{stamp_coords[i, 0]:.1f}", f"{stamp_coords[i, 1]:.1f}",
-                    "yes", f"{hm_coords[j, 0]:.1f}", f"{hm_coords[j, 1]:.1f}",
-                    f"{aligned_scores[i]:.6f}",
+                    f"{hm_coords[j, 0]:.1f}", f"{hm_coords[j, 1]:.1f}",
+                    "yes", f"{aligned_scores[i]:.6f}",
                 ])
             else:
                 writer.writerow([
                     i, f"{stamp_coords[i, 0]:.1f}", f"{stamp_coords[i, 1]:.1f}",
-                    "no", "", "", f"{aligned_scores[i]:.6f}",
+                    "", "", "no", f"{aligned_scores[i]:.6f}",
                 ])
 
 
