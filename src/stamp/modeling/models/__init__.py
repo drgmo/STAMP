@@ -215,6 +215,7 @@ class LitBaseClassifier(Base):
 
         self.class_weights = category_weights
         self.valid_auroc = MulticlassAUROC(len(categories))
+        self.train_auroc = MulticlassAUROC(len(categories))
         # Number classes
         self.categories = list(categories)
 
@@ -271,6 +272,16 @@ class LitTileClassifier(_TileLevelMixin, LitBaseClassifier):
             self.log(
                 f"{step_name}_auroc",
                 self.valid_auroc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+        elif step_name == "training":
+            self.train_auroc.update(logits, targets.long().argmax(dim=-1))
+            self.log(
+                f"{step_name}_auroc",
+                self.train_auroc,
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,
@@ -345,6 +356,16 @@ class LitSlideClassifier(LitBaseClassifier):
             self.log(
                 f"{step_name}_auroc",
                 self.valid_auroc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+        elif step_name == "training":
+            self.train_auroc.update(logits, targets.long().argmax(dim=-1))
+            self.log(
+                f"{step_name}_auroc",
+                self.train_auroc,
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,
