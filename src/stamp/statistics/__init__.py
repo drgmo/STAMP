@@ -59,6 +59,13 @@ class StatsConfig(BaseModel):
     time_label: str | None = None
     status_label: str | None = None
 
+    # Optional: enable tile-count reporting per class per fold in the
+    # extended categorical stats.  Requires feature H5 files (tile-level).
+    feature_dir: Path | None = None
+    slide_table: Path | None = None
+    patient_label: PandasLabel = "PATIENT"
+    filename_label: PandasLabel = "FILENAME"
+
 
 _Inches = NewType("_Inches", float)
 
@@ -68,6 +75,10 @@ def _compute_multitarget_classification_stats(
     output_dir: Path,
     pred_csvs: Sequence[Path],
     target_labels: Sequence[str],
+    feature_dir: Path | None = None,
+    slide_table: Path | None = None,
+    patient_label: PandasLabel = "PATIENT",
+    filename_label: PandasLabel = "FILENAME",
 ) -> None:
     """Compute statistics and plots for multi-target classification.
 
@@ -191,6 +202,10 @@ def _compute_multitarget_classification_stats(
             preds_csvs=pred_csvs,
             outpath=output_dir,
             ground_truth_label=target_label,
+            feature_dir=feature_dir,
+            slide_table=slide_table,
+            patient_label=patient_label,
+            filename_label=filename_label,
         )
         compute_calibration_stats_(
             preds_csvs=pred_csvs,
@@ -213,6 +228,10 @@ def compute_stats_(
     true_class: str | None = None,
     time_label: str | None = None,
     status_label: str | None = None,
+    feature_dir: Path | None = None,
+    slide_table: Path | None = None,
+    patient_label: PandasLabel = "PATIENT",
+    filename_label: PandasLabel = "FILENAME",
 ) -> None:
     """Compute and save statistics for the provided task and prediction CSVs.
 
@@ -237,6 +256,10 @@ def compute_stats_(
                     output_dir=output_dir,
                     pred_csvs=pred_csvs,
                     target_labels=list(ground_truth_label),
+                    feature_dir=feature_dir,
+                    slide_table=slide_table,
+                    patient_label=patient_label,
+                    filename_label=filename_label,
                 )
             else:
                 # Single-target classification (original behavior)
@@ -354,6 +377,10 @@ def compute_stats_(
                     preds_csvs=pred_csvs,
                     outpath=output_dir,
                     ground_truth_label=ground_truth_label,
+                    feature_dir=feature_dir,
+                    slide_table=slide_table,
+                    patient_label=patient_label,
+                    filename_label=filename_label,
                 )
 
                 # Calibration: Brier, ECE, MCE, reliability diagrams

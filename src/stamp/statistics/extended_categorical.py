@@ -10,13 +10,17 @@ This module does not modify existing behaviour — it only adds extra output
 files alongside the existing categorical stats.
 """
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pandas as pd
 import scipy.stats as st
 from sklearn import metrics
+
+_logger = logging.getLogger("stamp")
 
 __author__ = "STAMP contributors"
 __license__ = "MIT"
@@ -170,6 +174,120 @@ def _extract_prob_columns(df: pd.DataFrame, target_label: str) -> list[str]:
     ]
 
 
+def _count_tiles_in_h5(h5_path: Path) -> int | None:
+    """Count the number of tiles in a STAMP feature H5 file.
+
+    Returns None if the file doesn't exist or the dataset can't be read.
+    Returns 1 for slide-level features (single vector per file).
+    """
+    if not h5_path.exists():
+        return None
+    try:
+        with h5py.File(str(h5_path), "r") as f:
+            # slide/patient-level features: feat_type attribute says so
+            feat_type = f.attrs.get("feat_type")
+            if feat_type in ("slide", "patient"):
+                return 1
+            # tile-level: /feats or /patch_embeddings dataset
+            for key in ("feats", "patch_embeddings"):
+                if key in f:
+                    return int(f[key].shape[0])
+            # Fallback: check /tile/features (WSIVL-style layout)
+            if "tile" in f and "features" in f["tile"]:
+                return int(f["tile/features"].shape[0])
+    except (OSError, KeyError):
+        return None
+    return None
+
+
+def _tile_counts_per_patient(
+    *,
+    feature_dir: Path,
+    slide_table: Path,
+    patient_label: str,
+    filename_label: str,
+) -> dict[str, int]:
+    """Sum tile counts across all slides of each patient.
+
+    Returns ``{patient_id: total_tile_count}``.  Patients without any
+    readable H5 file are omitted.
+    """
+    if slide_table.suffix == ".xlsx":
+        df = pd.read_excel(slide_table, dtype=str)
+    else:
+        df = pd.read_csv(slide_table, dtype=str)
+
+    result: dict[str, int] = {}
+    missing = 0
+    for _, row in df.iterrows():
+        pid = row[patient_label]
+        filename = row[filename_label]
+        h5_path = feature_dir / filename
+        n = _count_tiles_in_h5(h5_path)
+        if n is None:
+            missing += 1
+            continue
+        result[pid] = result.get(pid, 0) + n
+
+    if missing:
+        _logger.info(
+            "Tile counting: %d slide files not found in %s", missing, feature_dir
+        )
+    return result
+
+
+def _compute_tile_distribution_row(
+    *,
+    fold_name: str,
+    csv_path: Path,
+    target_label: str,
+    categories: Sequence[str],
+    tile_counts_per_patient: dict[str, int],
+) -> dict | None:
+    """Build one row of tile-count-per-class statistics for a single fold.
+
+    Reads the patient_id / target column from patient-preds.csv, maps each
+    patient to their tile count, and sums per class.
+    """
+    df = pd.read_csv(csv_path, dtype=str)
+    # Find patient ID column — use the first column that isn't a stats column
+    # (patient-preds.csv writes patient_label first).  Heuristic: the column
+    # that contains keys present in tile_counts_per_patient.
+    candidate_cols = [
+        c for c in df.columns
+        if c != target_label
+        and not c.startswith(f"{target_label}_")
+        and not c.startswith("pred")
+        and c != "loss"
+    ]
+    pid_col = None
+    for c in candidate_cols:
+        if df[c].astype(str).isin(set(tile_counts_per_patient.keys())).any():
+            pid_col = c
+            break
+    if pid_col is None:
+        _logger.warning(
+            "Could not match patient IDs from %s to tile counts. "
+            "Skipping tile-count distribution for fold %s.",
+            csv_path, fold_name,
+        )
+        return None
+
+    df = df.dropna(subset=[target_label])
+    row: dict = {"fold": fold_name}
+    for c in categories:
+        mask = df[target_label] == c
+        pids = df.loc[mask, pid_col].astype(str)
+        total_tiles = sum(tile_counts_per_patient.get(p, 0) for p in pids)
+        row[f"tile_count_{c}"] = int(total_tiles)
+    # Sum of all tiles in fold
+    all_pids = df[pid_col].astype(str)
+    row["tile_count_total"] = int(
+        sum(tile_counts_per_patient.get(p, 0) for p in all_pids)
+    )
+    return row
+
+
 def _read_pred_csv(
     csv_path: Path, target_label: str
 ) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
@@ -198,6 +316,10 @@ def compute_extended_stats_(
     preds_csvs: Sequence[Path],
     outpath: Path,
     ground_truth_label: str,
+    feature_dir: Path | None = None,
+    slide_table: Path | None = None,
+    patient_label: str = "PATIENT",
+    filename_label: str = "FILENAME",
 ) -> None:
     """Write extended categorical stats next to the existing ones.
 
@@ -207,11 +329,32 @@ def compute_extended_stats_(
         - ``{label}_per_class_stats_split-{i}.csv``  (precision/recall/F1 per class)
         - ``{label}_confusion_matrix_split-{i}.csv``
         - ``{label}_fold_class_distribution.csv``    (true/predicted counts per fold)
+        - ``{label}_fold_tile_distribution.csv``     (tile counts per class per fold,
+          only if ``feature_dir`` and ``slide_table`` are provided)
     """
     outpath.mkdir(parents=True, exist_ok=True)
 
+    # Optionally pre-compute tile counts per patient
+    tile_counts_per_patient: dict[str, int] | None = None
+    if feature_dir is not None and slide_table is not None:
+        try:
+            tile_counts_per_patient = _tile_counts_per_patient(
+                feature_dir=feature_dir,
+                slide_table=slide_table,
+                patient_label=patient_label,
+                filename_label=filename_label,
+            )
+            _logger.info(
+                "Loaded tile counts for %d patients from %s",
+                len(tile_counts_per_patient), feature_dir,
+            )
+        except Exception as e:
+            _logger.warning("Failed to compute tile counts: %s", e)
+            tile_counts_per_patient = None
+
     per_fold_rows: dict[str, dict] = {}
     class_distribution_rows: list[dict] = []
+    tile_distribution_rows: list[dict] = []
     all_categories: list[str] = []
 
     for csv_path in preds_csvs:
@@ -251,6 +394,18 @@ def compute_extended_stats_(
             row[f"true_count_{c}"] = int((y_true == c).sum())
             row[f"predicted_count_{c}"] = int((y_pred_labels == c).sum())
         class_distribution_rows.append(row)
+
+        # Tile counts per class per fold (if tile counts available)
+        if tile_counts_per_patient is not None:
+            tile_row = _compute_tile_distribution_row(
+                fold_name=fold_name,
+                csv_path=Path(csv_path),
+                target_label=ground_truth_label,
+                categories=categories,
+                tile_counts_per_patient=tile_counts_per_patient,
+            )
+            if tile_row is not None:
+                tile_distribution_rows.append(tile_row)
 
     if not per_fold_rows:
         return
@@ -302,4 +457,11 @@ def compute_extended_stats_(
         dist_df = pd.DataFrame(class_distribution_rows).set_index("fold")
         dist_df.to_csv(
             outpath / f"{ground_truth_label}_fold_class_distribution.csv"
+        )
+
+    # Fold tile distribution CSV (tile counts per class per fold)
+    if tile_distribution_rows:
+        tile_df = pd.DataFrame(tile_distribution_rows).set_index("fold")
+        tile_df.to_csv(
+            outpath / f"{ground_truth_label}_fold_tile_distribution.csv"
         )

@@ -237,6 +237,10 @@ def _run_cli(args: argparse.Namespace) -> None:
                 true_class=config.statistics.true_class,
                 time_label=config.statistics.time_label,
                 status_label=config.statistics.status_label,
+                feature_dir=config.statistics.feature_dir,
+                slide_table=config.statistics.slide_table,
+                patient_label=config.statistics.patient_label,
+                filename_label=config.statistics.filename_label,
             )
 
         case "heatmaps":
