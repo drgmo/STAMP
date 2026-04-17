@@ -212,26 +212,43 @@ def compute_calibration_stats_(
         outpath / f"{ground_truth_label}_calibration-stats_individual.csv"
     )
 
-    # Aggregated stats
+    # Aggregated stats — calibration metrics (Brier, ECE, MCE) are all
+    # bounded to [0, 1], so use a logit-transformed CI to keep bounds valid.
+    from stamp.statistics.categorical import _bounded_ci
+
     score_cols = [c for c in _CALIB_METRICS if c != "n_samples"]
     scores = individual_df[score_cols]
-    means = scores.mean()
-    stds = scores.std(ddof=1)
-    sems = scores.sem()
     n_folds = len(scores)
-    if n_folds >= 2:
-        lower, upper = st.t.interval(
-            0.95, df=n_folds - 1, loc=means, scale=sems
-        )
-    else:
-        lower = means
-        upper = means
+    means: dict[str, float] = {}
+    stds: dict[str, float] = {}
+    lowers: dict[str, float] = {}
+    uppers: dict[str, float] = {}
+    for col in score_cols:
+        values = scores[col].dropna()
+        if len(values) == 0:
+            means[col] = np.nan
+            stds[col] = np.nan
+            lowers[col] = np.nan
+            uppers[col] = np.nan
+            continue
+        m = float(values.mean())
+        s = float(values.std(ddof=1)) if len(values) > 1 else np.nan
+        stds[col] = s
+        if len(values) >= 2:
+            _, lo, hi = _bounded_ci(values)
+            means[col] = m
+            lowers[col] = lo
+            uppers[col] = hi
+        else:
+            means[col] = m
+            lowers[col] = m
+            uppers[col] = m
     aggregated = pd.DataFrame(
         {
-            "mean": means,
-            "std": stds,
-            "95%_low": lower,
-            "95%_high": upper,
+            "mean": pd.Series(means),
+            "std": pd.Series(stds),
+            "95%_low": pd.Series(lowers),
+            "95%_high": pd.Series(uppers),
             "n_folds": n_folds,
         }
     )

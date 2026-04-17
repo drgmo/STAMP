@@ -3,9 +3,47 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import scipy.stats as st
 from sklearn import metrics
+
+
+def _bounded_ci(
+    values: pd.Series, alpha: float = 0.95
+) -> tuple[float, float, float]:
+    """95% CI for a metric bounded to [0, 1] using a logit transformation.
+
+    Using the t-distribution on raw means can produce CI bounds outside
+    [0, 1] when the sampling distribution is skewed or truncated (e.g.
+    F1 near 0 with only a few folds).  Transforming to logit space before
+    computing the CI and mapping back via sigmoid guarantees bounds in
+    (0, 1) while remaining asymptotically equivalent to the t-CI for
+    interior values.
+
+    Returns:
+        (mean, lower, upper) — all in the original [0, 1] scale.
+    """
+    values = values.dropna()
+    mean = float(values.mean())
+    n = len(values)
+    if n < 2:
+        return mean, mean, mean
+
+    # Logit with epsilon to avoid infinities when values hit 0 or 1
+    eps = 1e-6
+    clipped = np.clip(values.to_numpy(), eps, 1 - eps)
+    logits = np.log(clipped / (1 - clipped))
+    logit_mean = float(logits.mean())
+    logit_sem = float(logits.std(ddof=1) / np.sqrt(n))
+    t_crit = st.t.ppf(1 - (1 - alpha) / 2, df=n - 1)
+    lo_logit = logit_mean - t_crit * logit_sem
+    hi_logit = logit_mean + t_crit * logit_sem
+
+    # Sigmoid back to [0, 1]
+    lower = 1.0 / (1.0 + np.exp(-lo_logit))
+    upper = 1.0 / (1.0 + np.exp(-hi_logit))
+    return mean, float(lower), float(upper)
 
 __author__ = "Marko van Treeck"
 __copyright__ = "Copyright (C) 2022-2025 Marko van Treeck"
@@ -96,12 +134,25 @@ def _categorical(preds_df: pd.DataFrame, target_label: str) -> pd.DataFrame:
 
 def _aggregate_categorical_stats(df: pd.DataFrame) -> pd.DataFrame:
     stats = {}
+    score_cols = ["roc_auc_score", "average_precision_score", "f1_score"]
     for cat, data in df.groupby("level_1"):
-        scores_df = data[["roc_auc_score", "average_precision_score", "f1_score"]]
-        means, sems = scores_df.mean(), scores_df.sem()
-        lower, upper = st.t.interval(0.95, df=len(scores_df) - 1, loc=means, scale=sems)
+        scores_df = data[score_cols]
+        means: dict[str, float] = {}
+        lowers: dict[str, float] = {}
+        uppers: dict[str, float] = {}
+        for col in score_cols:
+            m, lo, hi = _bounded_ci(scores_df[col])
+            means[col] = m
+            lowers[col] = lo
+            uppers[col] = hi
         cat_stats_df = (
-            pd.DataFrame.from_dict({"mean": means, "95%_low": lower, "95%_high": upper})
+            pd.DataFrame.from_dict(
+                {
+                    "mean": pd.Series(means),
+                    "95%_low": pd.Series(lowers),
+                    "95%_high": pd.Series(uppers),
+                }
+            )
             .transpose()
             .unstack()
         )

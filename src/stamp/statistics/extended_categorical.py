@@ -419,25 +419,56 @@ def compute_extended_stats_(
     )
 
     # Aggregated (mean, std, 95% CI)
+    # For metrics bounded to [0, 1] we use a logit-transformed CI so that
+    # bounds stay in (0, 1).  For unbounded metrics (MCC, kappa, log_loss)
+    # we fall back to a raw t-based CI.
+    from stamp.statistics.categorical import _bounded_ci
+
+    bounded_metrics = {
+        "macro_auroc", "weighted_auroc",
+        "macro_f1", "weighted_f1",
+        "macro_average_precision", "weighted_average_precision",
+        "balanced_accuracy", "accuracy",
+    }
     score_cols = [c for c in _FOLD_METRICS if c != "n_samples"]
     scores = individual_df[score_cols]
-    means = scores.mean()
-    stds = scores.std(ddof=1)
-    sems = scores.sem()
     n_folds = len(scores)
-    if n_folds >= 2:
-        lower, upper = st.t.interval(
-            0.95, df=n_folds - 1, loc=means, scale=sems
-        )
-    else:
-        lower = means
-        upper = means
+    means: dict[str, float] = {}
+    stds: dict[str, float] = {}
+    lowers: dict[str, float] = {}
+    uppers: dict[str, float] = {}
+    for col in score_cols:
+        values = scores[col].dropna()
+        if len(values) == 0:
+            means[col] = np.nan
+            stds[col] = np.nan
+            lowers[col] = np.nan
+            uppers[col] = np.nan
+            continue
+        m = float(values.mean())
+        s = float(values.std(ddof=1)) if len(values) > 1 else np.nan
+        stds[col] = s
+        if col in bounded_metrics and len(values) >= 2:
+            _, lo, hi = _bounded_ci(values)
+            means[col] = m
+            lowers[col] = lo
+            uppers[col] = hi
+        elif len(values) >= 2:
+            sem = float(values.sem())
+            t_crit = st.t.ppf(0.975, df=len(values) - 1)
+            means[col] = m
+            lowers[col] = m - t_crit * sem
+            uppers[col] = m + t_crit * sem
+        else:
+            means[col] = m
+            lowers[col] = m
+            uppers[col] = m
     aggregated = pd.DataFrame(
         {
-            "mean": means,
-            "std": stds,
-            "95%_low": lower,
-            "95%_high": upper,
+            "mean": pd.Series(means),
+            "std": pd.Series(stds),
+            "95%_low": pd.Series(lowers),
+            "95%_high": pd.Series(uppers),
             "n_folds": n_folds,
         }
     )
