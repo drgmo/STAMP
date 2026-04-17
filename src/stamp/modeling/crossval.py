@@ -226,6 +226,8 @@ def categorical_crossval_(
             )
 
             _hm_normalize = config.heatmap_normalize != "raw" if config.heatmap_dir else True
+            # Write diagnostics only for the first fold to avoid duplicate CSVs
+            _diag_dir = config.heatmap_diagnostics_dir if split_i == 0 else None
 
             train_dl, train_categories = create_dataloader(
                 feature_type=feature_type,
@@ -240,6 +242,7 @@ def categorical_crossval_(
                 heatmap_dir=config.heatmap_dir,
                 heatmap_score_key=config.heatmap_score_key,
                 heatmap_normalize=_hm_normalize,
+                heatmap_diagnostics_dir=_diag_dir,
             )
             test_dl, _ = create_dataloader(
                 feature_type=feature_type,
@@ -254,6 +257,7 @@ def categorical_crossval_(
                 heatmap_dir=config.heatmap_dir,
                 heatmap_score_key=config.heatmap_score_key,
                 heatmap_normalize=_hm_normalize,
+                heatmap_diagnostics_dir=_diag_dir,
             )
 
             # Infer feature dimension
@@ -318,6 +322,7 @@ def categorical_crossval_(
                 heatmap_dir=config.heatmap_dir,
                 heatmap_score_key=config.heatmap_score_key,
                 heatmap_normalize=_hm_normalize,
+                heatmap_diagnostics_dir=_diag_dir,
             )
 
             predictions = _predict(
@@ -378,6 +383,11 @@ def categorical_crossval_(
                     patient_label=config.patient_label,
                     ground_truth_label=config.ground_truth_label,
                 ).to_csv(split_dir / "patient-preds.csv", index=False)
+
+    # Write alignment summary after all folds
+    if config.heatmap_diagnostics_dir:
+        from stamp.modeling.heatmap_scores import write_alignment_summary
+        write_alignment_summary(config.heatmap_diagnostics_dir)
 
 
 def _get_splits(

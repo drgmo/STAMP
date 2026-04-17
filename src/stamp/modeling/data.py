@@ -95,6 +95,7 @@ def tile_bag_dataloader(
     heatmap_dir: Path | None = None,
     heatmap_score_key: str = "pos",
     heatmap_normalize: bool = True,
+    heatmap_diagnostics_dir: Path | None = None,
 ) -> tuple[
     DataLoader[tuple[Bags, CoordinatesBatch, BagSizes, EncodedTargets]],
     Sequence[Category] | Mapping[str, Sequence[Category]],
@@ -136,6 +137,7 @@ def tile_bag_dataloader(
         heatmap_dir=heatmap_dir,
         heatmap_score_key=heatmap_score_key,
         heatmap_normalize=heatmap_normalize,
+        heatmap_diagnostics_dir=heatmap_diagnostics_dir,
     )
     dl = DataLoader(
         ds,
@@ -345,6 +347,7 @@ def create_dataloader(
     heatmap_dir: Path | None = None,
     heatmap_score_key: str = "pos",
     heatmap_normalize: bool = True,
+    heatmap_diagnostics_dir: Path | None = None,
 ) -> tuple[DataLoader, Sequence[Category] | Mapping[str, Sequence[Category]]]:
     """Unified dataloader for all feature types and tasks."""
     if feature_type == "tile":
@@ -370,6 +373,7 @@ def create_dataloader(
             heatmap_dir=heatmap_dir,
             heatmap_score_key=heatmap_score_key,
             heatmap_normalize=heatmap_normalize,
+            heatmap_diagnostics_dir=heatmap_diagnostics_dir,
         )
     elif feature_type in {"slide", "patient"}:
         # For slide/patient-level: single feature vector per entry
@@ -582,6 +586,7 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
     heatmap_dir: Path | None = None
     heatmap_score_key: str = "pos"
     heatmap_normalize: bool = True
+    heatmap_diagnostics_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if len(self.bags) != len(self.ground_truths):
@@ -678,6 +683,7 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
                     score_key=self.heatmap_score_key,
                     feature_h5_path=Path(str(first_bag)),
                     normalize=self.heatmap_normalize,
+                    diagnostics_dir=self.heatmap_diagnostics_dir,
                 )
                 weights = torch.from_numpy(scores).float().unsqueeze(-1)  # (N, 1)
                 feats = feats * weights  # (N, D) * (N, 1) → (N, D)

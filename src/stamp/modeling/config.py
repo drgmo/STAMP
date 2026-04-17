@@ -64,6 +64,10 @@ class TrainConfig(BaseModel):
         default="minmax",
         description="Score normalization for weighting: 'minmax' (→[0,1]) or 'raw'",
     )
+    heatmap_diagnostics_dir: Path | None = Field(
+        default=None,
+        description="If set, write per-slide alignment CSVs showing matched/unmatched tiles.",
+    )
 
 
 class CrossvalConfig(TrainConfig):

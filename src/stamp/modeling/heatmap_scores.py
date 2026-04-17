@@ -12,8 +12,15 @@ Coordinate handling:
     own embedding H5 files rather than STAMP feature files).  This module
     auto-detects the unit mismatch by comparing tile strides and converts
     pixel coordinates to micrometers using the MPP from STAMP metadata.
+
+Diagnostics:
+    When ``diagnostics_dir`` is passed, a per-slide CSV is written with
+    every STAMP tile coordinate, the matched heatmap coordinate (if any),
+    and the assigned score.  A summary CSV is also written listing matched /
+    unmatched counts per slide.
 """
 
+import csv
 import logging
 from collections import defaultdict, deque
 from pathlib import Path
@@ -34,6 +41,7 @@ def load_heatmap_scores(
     score_key: str = "pos",
     feature_h5_path: Path | None = None,
     normalize: bool = True,
+    diagnostics_dir: Path | None = None,
 ) -> np.ndarray:
     """Load heatmap scores aligned to STAMP feature tile order.
 
@@ -75,6 +83,8 @@ def load_heatmap_scores(
                 stamp_coords_um, hm_x, hm_y, scores,
                 tile_size_um=tile_size_um,
                 tile_size_px=tile_size_px,
+                slide_name=slide_name,
+                diagnostics_dir=diagnostics_dir,
             )
             return _normalize(aligned) if normalize else aligned
 
@@ -312,6 +322,9 @@ def _estimate_stride(x: np.ndarray, y: np.ndarray) -> float | None:
     return float(np.min(diffs))
 
 
+_alignment_summary: list[dict] = []
+
+
 def _align_scores(
     stamp_coords_um: np.ndarray,
     hm_x: np.ndarray,
@@ -320,6 +333,8 @@ def _align_scores(
     *,
     tile_size_um: float,
     tile_size_px: int | None,
+    slide_name: str = "",
+    diagnostics_dir: Path | None = None,
 ) -> np.ndarray:
     """Align heatmap scores to STAMP tile order by coordinate matching.
 
@@ -339,6 +354,16 @@ def _align_scores(
     # Step 2: fast path — same count + coordinates match after conversion
     if n_stamp == n_hm:
         if np.allclose(stamp_coords_um, hm_coords_um, atol=1.0, rtol=0):
+            if diagnostics_dir:
+                _write_diagnostics(
+                    diagnostics_dir, slide_name, stamp_coords_um,
+                    hm_coords_um, scores, matched_mask=np.ones(n_stamp, dtype=bool),
+                    aligned_scores=scores.copy(),
+                )
+                _alignment_summary.append({
+                    "slide": slide_name, "stamp_tiles": n_stamp,
+                    "heatmap_tiles": n_hm, "matched": n_stamp, "unmatched": 0,
+                })
             return scores.copy()
 
     # Step 3: coordinate-based lookup with tolerance
@@ -352,10 +377,15 @@ def _align_scores(
         buckets[key].append(j)
 
     aligned_scores = np.full(n_stamp, np.nan, dtype=np.float32)
+    matched_mask = np.zeros(n_stamp, dtype=bool)
+    matched_hm_indices = np.full(n_stamp, -1, dtype=np.int64)
     matched = 0
     for i, key in enumerate(map(tuple, ref)):
         if buckets[key]:
-            aligned_scores[i] = scores[buckets[key].popleft()]
+            j = buckets[key].popleft()
+            aligned_scores[i] = scores[j]
+            matched_mask[i] = True
+            matched_hm_indices[i] = j
             matched += 1
 
     # Partial match: unmatched STAMP tiles get score=0 (suppressed)
@@ -363,25 +393,94 @@ def _align_scores(
 
     if matched == 0:
         _logger.warning(
-            "Heatmap alignment: 0/%d STAMP tiles matched for this slide. "
+            "[%s] Heatmap alignment: 0/%d STAMP tiles matched. "
             "All tiles get score=0. "
             "STAMP stride ≈ %s, heatmap stride ≈ %s, "
             "tile_size_um=%.1f, tile_size_px=%s.",
-            n_stamp,
+            slide_name, n_stamp,
             _estimate_stride(stamp_coords_um[:, 0], stamp_coords_um[:, 1]),
             _estimate_stride(hm_x, hm_y),
             tile_size_um, tile_size_px,
         )
     elif matched < n_stamp:
         _logger.warning(
-            "Heatmap alignment: %d/%d STAMP tiles matched. "
+            "[%s] Heatmap alignment: %d/%d STAMP tiles matched. "
             "%d unmatched tiles get score=0.",
-            matched, n_stamp, n_stamp - matched,
+            slide_name, matched, n_stamp, n_stamp - matched,
         )
     else:
-        _logger.debug("Heatmap alignment: all %d tiles matched.", n_stamp)
+        _logger.debug("[%s] Heatmap alignment: all %d tiles matched.", slide_name, n_stamp)
+
+    # Diagnostics export
+    if diagnostics_dir:
+        _write_diagnostics(
+            diagnostics_dir, slide_name, stamp_coords_um,
+            hm_coords_um, scores, matched_mask=matched_mask,
+            aligned_scores=aligned_scores, matched_hm_indices=matched_hm_indices,
+        )
+        _alignment_summary.append({
+            "slide": slide_name, "stamp_tiles": n_stamp,
+            "heatmap_tiles": n_hm, "matched": matched,
+            "unmatched": n_stamp - matched,
+        })
 
     return aligned_scores
+
+
+def _write_diagnostics(
+    diagnostics_dir: Path,
+    slide_name: str,
+    stamp_coords: np.ndarray,
+    hm_coords: np.ndarray,
+    raw_hm_scores: np.ndarray,
+    matched_mask: np.ndarray,
+    aligned_scores: np.ndarray,
+    matched_hm_indices: np.ndarray | None = None,
+) -> None:
+    """Write a per-tile CSV showing match status for a single slide."""
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = slide_name.replace("/", "_").replace("\\", "_")
+    csv_path = diagnostics_dir / f"{safe_name}_alignment.csv"
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "tile_idx", "stamp_x_um", "stamp_y_um",
+            "matched", "hm_x_um", "hm_y_um", "score",
+        ])
+        for i in range(len(stamp_coords)):
+            if matched_mask[i] and matched_hm_indices is not None and matched_hm_indices[i] >= 0:
+                j = matched_hm_indices[i]
+                writer.writerow([
+                    i, f"{stamp_coords[i, 0]:.1f}", f"{stamp_coords[i, 1]:.1f}",
+                    "yes", f"{hm_coords[j, 0]:.1f}", f"{hm_coords[j, 1]:.1f}",
+                    f"{aligned_scores[i]:.6f}",
+                ])
+            else:
+                writer.writerow([
+                    i, f"{stamp_coords[i, 0]:.1f}", f"{stamp_coords[i, 1]:.1f}",
+                    "no", "", "", f"{aligned_scores[i]:.6f}",
+                ])
+
+
+def write_alignment_summary(diagnostics_dir: Path) -> None:
+    """Write a summary CSV with per-slide matched/unmatched counts.
+
+    Call this once after all slides have been processed (e.g. at end of
+    training setup or after encode_slides).
+    """
+    if not _alignment_summary:
+        return
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = diagnostics_dir / "alignment_summary.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "slide", "stamp_tiles", "heatmap_tiles", "matched", "unmatched",
+        ])
+        writer.writeheader()
+        writer.writerows(_alignment_summary)
+    _logger.info("Alignment summary written to %s (%d slides)", csv_path, len(_alignment_summary))
+    _alignment_summary.clear()
 
 
 # ---------------------------------------------------------------------------

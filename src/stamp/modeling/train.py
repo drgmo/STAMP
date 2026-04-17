@@ -89,6 +89,7 @@ def train_categorical_model_(
         heatmap_dir=config.heatmap_dir,
         heatmap_score_key=config.heatmap_score_key,
         heatmap_normalize=_hm_normalize,
+        heatmap_diagnostics_dir=config.heatmap_diagnostics_dir,
     )
     train_model_(
         output_dir=config.output_dir,
@@ -121,6 +122,7 @@ def setup_model_for_training(
     heatmap_dir: Path | None = None,
     heatmap_score_key: str = "pos",
     heatmap_normalize: bool = True,
+    heatmap_diagnostics_dir: Path | None = None,
 ) -> tuple[
     lightning.LightningModule,
     DataLoader,
@@ -141,6 +143,7 @@ def setup_model_for_training(
             heatmap_dir=heatmap_dir,
             heatmap_score_key=heatmap_score_key,
             heatmap_normalize=heatmap_normalize,
+            heatmap_diagnostics_dir=heatmap_diagnostics_dir,
         )
     )
 
@@ -374,6 +377,7 @@ def setup_dataloaders_for_training(
     heatmap_dir: Path | None = None,
     heatmap_score_key: str = "pos",
     heatmap_normalize: bool = True,
+    heatmap_diagnostics_dir: Path | None = None,
 ) -> tuple[
     DataLoader,
     DataLoader,
@@ -478,6 +482,7 @@ def setup_dataloaders_for_training(
             heatmap_dir=heatmap_dir,
             heatmap_score_key=heatmap_score_key,
             heatmap_normalize=heatmap_normalize,
+            heatmap_diagnostics_dir=heatmap_diagnostics_dir,
         )
 
         valid_dl, _ = create_dataloader(
@@ -493,6 +498,7 @@ def setup_dataloaders_for_training(
             heatmap_dir=heatmap_dir,
             heatmap_score_key=heatmap_score_key,
             heatmap_normalize=heatmap_normalize,
+            heatmap_diagnostics_dir=heatmap_diagnostics_dir,
         )
 
         # Infer feature dimension automatically
