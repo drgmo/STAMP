@@ -237,6 +237,14 @@ statistics:
   #- "/path/to/split-3/patient-preds.csv"
   #- "/path/to/split-4/patient-preds.csv"
 
+  # Optional: feature directory + slide table enable per-fold tile-count
+  # statistics per class (writes {label}_fold_tile_distribution.csv).
+  # Useful to diagnose tile-level class imbalance across folds.
+  #feature_dir: "/path/your/extracted/features/are/stored/in"
+  #slide_table: "/path/of/slide.csv"
+  #patient_label: "PATIENT"
+  #filename_label: "FILENAME"
+
 
 heatmaps:
   output_dir: "/path/to/save/files/to"
