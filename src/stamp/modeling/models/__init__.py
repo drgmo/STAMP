@@ -273,6 +273,7 @@ class LitTileClassifier(_TileLevelMixin, LitBaseClassifier):
                 self.valid_auroc,
                 on_step=False,
                 on_epoch=True,
+                prog_bar=True,
                 sync_dist=True,
             )
 
@@ -346,6 +347,7 @@ class LitSlideClassifier(LitBaseClassifier):
                 self.valid_auroc,
                 on_step=False,
                 on_epoch=True,
+                prog_bar=True,
                 sync_dist=True,
             )
         return loss
