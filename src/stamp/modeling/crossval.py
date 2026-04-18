@@ -1,11 +1,12 @@
+import json
 import logging
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from stamp.modeling.config import AdvancedConfig, CrossvalConfig
@@ -15,6 +16,7 @@ from stamp.modeling.data import (
     load_patient_data_,
     log_patient_class_summary,
 )
+from stamp.modeling.prompt_masks import group_for_fold
 from stamp.modeling.deploy import (
     _predict,
     _to_prediction_df,
@@ -35,6 +37,10 @@ __license__ = "MIT"
 
 _logger = logging.getLogger("stamp")
 
+# Shared with WSIVL's fold-aware prompt-mask pipeline. Changing this value
+# breaks reproducibility of the split contract between the two repos.
+CV_RANDOM_STATE: Final[int] = 0
+
 
 class _Split(BaseModel):
     train_patients: set[PatientId]
@@ -42,7 +48,39 @@ class _Split(BaseModel):
 
 
 class _Splits(BaseModel):
+    """Cross-validation splits, persisted as ``splits.json``.
+
+    Extra metadata fields are optional with defaults so that older split
+    files (containing only ``splits``) still validate.
+    """
+
+    random_state: int = Field(default=CV_RANDOM_STATE)
+    n_splits: int | None = Field(default=None)
+    stratified: bool | None = Field(default=None)
+    patient_label: str | None = Field(default=None)
     splits: Sequence[_Split]
+
+    def to_canonical_json(self, indent: int = 4) -> str:
+        """Serialize with sorted patient lists for byte-stable output."""
+        return json.dumps(
+            {
+                "random_state": self.random_state,
+                "n_splits": self.n_splits
+                if self.n_splits is not None
+                else len(self.splits),
+                "stratified": self.stratified,
+                "patient_label": self.patient_label,
+                "splits": [
+                    {
+                        "train_patients": sorted(s.train_patients),
+                        "test_patients": sorted(s.test_patients),
+                    }
+                    for s in self.splits
+                ],
+            },
+            indent=indent,
+            sort_keys=True,
+        )
 
 
 def categorical_crossval_(
@@ -78,6 +116,20 @@ def categorical_crossval_(
     config.output_dir.mkdir(parents=True, exist_ok=True)
     splits_file = config.output_dir / "splits.json"
 
+    # If the user provided an external splits.json (typically authored by
+    # WSIVL), copy it into the STAMP run directory so the splits file
+    # inside ``output_dir`` always reflects the actual run configuration.
+    if config.splits_path is not None and not splits_file.exists():
+        _logger.info(
+            "seeding %s from external splits_path=%s",
+            splits_file,
+            config.splits_path,
+        )
+        splits_file.write_text(
+            config.splits_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
     # Generate the splits, or load them from the splits file if they already exist
     if not splits_file.exists():
         # Detect multi-target classification (ground_truth is a dict)
@@ -103,7 +155,7 @@ def categorical_crossval_(
         )
 
         with open(splits_file, "w") as fp:
-            fp.write(splits.model_dump_json(indent=4))
+            fp.write(splits.to_canonical_json(indent=4))
     else:
         _logger.debug(f"reading splits from {splits_file}")
         with open(splits_file, "r") as fp:
@@ -175,6 +227,33 @@ def categorical_crossval_(
     else:
         categories = []
 
+    # Resolve prompt-mask source once: detect per-fold vs shared layout and
+    # validate n_folds / splits.json provenance before the training loop.
+    mask_handle = None
+    if config.prompt_masks_path is not None:
+        from stamp.modeling.prompt_masks import MaskMode, open_prompt_masks
+
+        mask_handle = open_prompt_masks(config.prompt_masks_path)
+        if (
+            mask_handle.mode is MaskMode.PER_FOLD
+            and mask_handle.n_folds is not None
+            and mask_handle.n_folds != len(splits.splits)
+        ):
+            raise RuntimeError(
+                f"prompt_masks.h5 has n_folds={mask_handle.n_folds} but "
+                f"splits.json has {len(splits.splits)} folds"
+            )
+        _logger.info(
+            "using prompt masks %s (mode=%s, n_folds=%s)",
+            mask_handle.path,
+            mask_handle.mode.value,
+            mask_handle.n_folds,
+        )
+    elif config.require_prompt_masks:
+        raise RuntimeError(
+            "require_prompt_masks=True but config.prompt_masks_path is unset"
+        )
+
     for split_i, split in enumerate(splits.splits):
         split_dir = config.output_dir / f"split-{split_i}"
 
@@ -225,6 +304,12 @@ def categorical_crossval_(
                 else None
             )
 
+            mask_group = (
+                group_for_fold(mask_handle, split_i)
+                if mask_handle is not None
+                else None
+            )
+
             train_dl, train_categories = create_dataloader(
                 feature_type=feature_type,
                 task=config.task,
@@ -235,6 +320,10 @@ def categorical_crossval_(
                 num_workers=advanced.num_workers,
                 transform=train_transform,
                 categories=fold_categories,
+                prompt_masks_path=config.prompt_masks_path,
+                mask_group=mask_group,
+                mask_application=config.prompt_mask_application,
+                mask_threshold=config.prompt_mask_threshold,
             )
             test_dl, _ = create_dataloader(
                 feature_type=feature_type,
@@ -246,6 +335,10 @@ def categorical_crossval_(
                 num_workers=advanced.num_workers,
                 transform=None,
                 categories=train_categories,
+                prompt_masks_path=config.prompt_masks_path,
+                mask_group=mask_group,
+                mask_application=config.prompt_mask_application,
+                mask_threshold=config.prompt_mask_threshold,
             )
 
             # Infer feature dimension
@@ -406,7 +499,7 @@ def _get_splits(
         # regression or unknown: do not stratify (KFold will ignore y)
         y_strat = None
 
-    skf = spliter(n_splits=n_splits, shuffle=True, random_state=0)
+    skf = spliter(n_splits=n_splits, shuffle=True, random_state=CV_RANDOM_STATE)
 
     if y_strat is None:
         splits_iter = skf.split(patients)
@@ -414,12 +507,15 @@ def _get_splits(
         splits_iter = skf.split(patients, y_strat)
 
     splits = _Splits(
+        random_state=CV_RANDOM_STATE,
+        n_splits=n_splits,
+        stratified=(y_strat is not None),
         splits=[
             _Split(
                 train_patients=set(patients[train_indices]),
                 test_patients=set(patients[test_indices]),
             )
             for train_indices, test_indices in splits_iter
-        ]
+        ],
     )
     return splits

@@ -1,6 +1,7 @@
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
@@ -48,10 +49,45 @@ class TrainConfig(BaseModel):
     # Experimental features
     use_vary_precision_transform: bool = False
 
+    # Prompt-derived tile masks (authored by WSIVL).
+    prompt_masks_path: Path | None = Field(
+        default=None,
+        description=(
+            "HDF5 with prompt-derived tile masks. Layout: /fold_<i>/{slide} "
+            "or /shared/{slide}, detected via attrs.mask_mode. "
+            "See stamp.modeling.prompt_masks."
+        ),
+    )
+    prompt_mask_application: Literal[
+        "feature_weight", "feature_gate", "none"
+    ] = Field(
+        default="feature_weight",
+        description=(
+            "How the mask modulates tile features before MIL. "
+            "'feature_weight' multiplies features by the mask (broadcast "
+            "over the feature axis). 'feature_gate' keeps only tiles whose "
+            "mask value is >= prompt_mask_threshold. 'none' ignores the mask."
+        ),
+    )
+    prompt_mask_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+
 
 class CrossvalConfig(TrainConfig):
     n_splits: int = Field(5, ge=2)
     task: Task | None = Field(default="classification")
+
+    splits_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional external splits.json (typically authored by WSIVL). "
+            "If set, STAMP loads it instead of regenerating, and verifies "
+            "the locally computed splits match patient-set-wise."
+        ),
+    )
+    require_prompt_masks: bool = Field(
+        default=False,
+        description="If true, abort when prompt_masks_path is not set.",
+    )
 
 
 class DeploymentConfig(BaseModel):

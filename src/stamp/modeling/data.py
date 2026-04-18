@@ -92,6 +92,10 @@ def tile_bag_dataloader(
     shuffle: bool,
     num_workers: int,
     transform: Callable[[Tensor], Tensor] | None,
+    prompt_masks_path: Path | None = None,
+    mask_group: str | None = None,
+    mask_application: str = "feature_weight",
+    mask_threshold: float = 0.0,
 ) -> tuple[
     DataLoader[tuple[Bags, CoordinatesBatch, BagSizes, EncodedTargets]],
     Sequence[Category] | Mapping[str, Sequence[Category]],
@@ -123,6 +127,10 @@ def tile_bag_dataloader(
         ground_truths=targets,
         transform=transform,
         deterministic=(not shuffle),
+        prompt_masks_path=prompt_masks_path,
+        mask_group=mask_group,
+        mask_application=mask_application,
+        mask_threshold=mask_threshold,
     )
     dl = DataLoader(
         ds,
@@ -329,6 +337,10 @@ def create_dataloader(
     num_workers: int,
     transform: Callable[[Tensor], Tensor] | None,
     categories: Sequence[Category] | Mapping[str, Sequence[Category]] | None = None,
+    prompt_masks_path: Path | None = None,
+    mask_group: str | None = None,
+    mask_application: str = "feature_weight",
+    mask_threshold: float = 0.0,
 ) -> tuple[DataLoader, Sequence[Category] | Mapping[str, Sequence[Category]]]:
     """Unified dataloader for all feature types and tasks."""
     if feature_type == "tile":
@@ -351,6 +363,16 @@ def create_dataloader(
             shuffle=shuffle,
             num_workers=num_workers,
             transform=transform,
+            prompt_masks_path=prompt_masks_path,
+            mask_group=mask_group,
+            mask_application=mask_application,
+            mask_threshold=mask_threshold,
+        )
+    if prompt_masks_path is not None and feature_type != "tile":
+        _logger.warning(
+            "prompt_masks_path set but feature_type=%s; "
+            "masks are only applied for tile-level features",
+            feature_type,
         )
     elif feature_type in {"slide", "patient"}:
         # For slide/patient-level: single feature vector per entry
@@ -559,16 +581,34 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
     transform: Callable[[Tensor], Tensor] | None
     deterministic: bool = False
 
+    # Optional prompt-derived tile masks. When set, the dataset opens the
+    # given HDF5 file lazily per worker and looks up the mask for each
+    # bag's slide under ``mask_group``.
+    prompt_masks_path: Path | None = None
+    mask_group: str | None = None
+    mask_application: str = "feature_weight"
+    mask_threshold: float = 0.0
+
     def __post_init__(self) -> None:
         if len(self.bags) != len(self.ground_truths):
             raise ValueError(
                 "the number of ground truths has to match the number of bags"
+            )
+        if self.mask_application not in ("feature_weight", "feature_gate", "none"):
+            raise ValueError(
+                f"unknown mask_application={self.mask_application!r}"
+            )
+        if self.prompt_masks_path is not None and self.mask_group is None:
+            raise ValueError(
+                "prompt_masks_path set but mask_group is None; "
+                "caller must pick a fold (e.g. 'fold_2' or 'shared')"
             )
         # Initialise per-worker HDF5 handle cache here so __getitem__ avoids
         # a hasattr() call on every tile read.
         self._h5_handle_cache: OrderedDict[FeaturePath | _BinaryIOLike, h5py.File] = (
             OrderedDict()
         )
+        self._mask_handle: h5py.File | None = None
 
     def __getstate__(self) -> dict:
         # h5py file handles cannot be pickled (required when DataLoader uses
@@ -576,7 +616,48 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
         # files lazily on the first __getitem__ access.
         state = self.__dict__.copy()
         state["_h5_handle_cache"] = OrderedDict()
+        state["_mask_handle"] = None
         return state
+
+    def _open_mask_handle(self) -> h5py.File:
+        if self._mask_handle is None:
+            assert self.prompt_masks_path is not None
+            try:
+                self._mask_handle = h5py.File(
+                    self.prompt_masks_path, "r", swmr=True, libver="latest"
+                )
+            except Exception:
+                self._mask_handle = h5py.File(self.prompt_masks_path, "r")
+        return self._mask_handle
+
+    def _load_mask_for(self, bag_file) -> "np.ndarray | None":
+        if self.prompt_masks_path is None or self.mask_application == "none":
+            return None
+        from pathlib import Path as _Path
+
+        stem = _Path(str(bag_file)).stem
+        mf = self._open_mask_handle()
+        assert self.mask_group is not None
+        grp = mf.get(self.mask_group)
+        if grp is None:
+            raise RuntimeError(
+                f"prompt_masks.h5 missing group {self.mask_group!r}"
+            )
+        if stem not in grp:
+            # Missing masks are warnings, not errors: skip application for
+            # this bag and leave features unchanged.
+            _logger.warning(
+                "prompt mask missing for slide %s in group %s",
+                stem,
+                self.mask_group,
+            )
+            return None
+        ds = grp[stem]
+        if not isinstance(ds, h5py.Dataset):
+            raise RuntimeError(
+                f"expected dataset at {self.mask_group}/{stem}, got {type(ds)}"
+            )
+        return ds[()]
 
     def __len__(self) -> int:
         return len(self.bags)
@@ -587,6 +668,10 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
         # Collect all the features
         feats = []
         coords_um = []
+        mask_slices: list[np.ndarray] | None = (
+            [] if self.prompt_masks_path is not None
+            and self.mask_application != "none" else None
+        )
         for bag_file in self.bags[index]:
             if bag_file not in self._h5_handle_cache:
                 # Limit open handles to avoid reaching OS ulimits
@@ -629,8 +714,30 @@ class BagDataset(Dataset[tuple[_Bag, _Coordinates, BagSize, _EncodedTarget]]):
             feats.append(torch.from_numpy(arr))
             coords_um.append(torch.from_numpy(get_coords(h5).coords_um))
 
+            if mask_slices is not None:
+                mask_np = self._load_mask_for(bag_file)
+                if mask_np is None:
+                    mask_slices.append(np.ones(arr.shape[0], dtype=np.float32))
+                else:
+                    if mask_np.shape[0] != arr.shape[0]:
+                        raise RuntimeError(
+                            f"mask length {mask_np.shape[0]} != patch count "
+                            f"{arr.shape[0]} for {bag_file}"
+                        )
+                    mask_slices.append(mask_np.astype(np.float32))
+
         feats = torch.concat(feats).float()
         coords_um = torch.concat(coords_um).float()
+
+        if mask_slices is not None:
+            mask_t = torch.from_numpy(np.concatenate(mask_slices)).float()
+            if self.mask_application == "feature_weight":
+                feats = feats * mask_t.unsqueeze(-1)
+            elif self.mask_application == "feature_gate":
+                keep = mask_t >= self.mask_threshold
+                feats = feats[keep]
+                coords_um = coords_um[keep]
+            # 'none' is handled by mask_slices being None above.
 
         if self.transform is not None:
             feats = self.transform(feats)
