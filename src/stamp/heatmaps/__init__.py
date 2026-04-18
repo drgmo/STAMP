@@ -325,6 +325,9 @@ def heatmaps_(
     # top tiles
     topk: int,
     bottomk: int,
+    # Optional per-fold prompt-mask weighting (see stamp.modeling.prompt_masks).
+    prompt_masks_path: Path | None = None,
+    mask_group: str | None = None,
 ) -> None:
     # Collect slides to generate heatmaps for
     if slide_paths is not None:
@@ -333,6 +336,20 @@ def heatmaps_(
         wsis_to_process = (
             p for ext in supported_extensions for p in wsi_dir.glob(f"**/*{ext}")
         )
+
+    # Open prompt mask HDF5 once per heatmap run.
+    mask_h5: h5py.File | None = None
+    if prompt_masks_path is not None:
+        if mask_group is None:
+            raise ValueError(
+                "heatmaps_: prompt_masks_path set but mask_group is None"
+            )
+        try:
+            mask_h5 = h5py.File(
+                prompt_masks_path, "r", swmr=True, libver="latest"
+            )
+        except Exception:
+            mask_h5 = h5py.File(prompt_masks_path, "r")
 
     for wsi_path in wsis_to_process:
         h5_path = feature_dir / wsi_path.with_suffix(".h5").name
@@ -363,6 +380,26 @@ def heatmaps_(
                     f"Feature file {h5_path} is a slide or patient level feature. Heatmaps are currently supported for tile-level features only."
                 )
             feats_np = np.asarray(h5["feats"])
+            if mask_h5 is not None:
+                grp = mask_h5.get(mask_group)
+                if grp is None:
+                    raise RuntimeError(
+                        f"prompt_masks.h5 has no group {mask_group!r}"
+                    )
+                if h5_path.stem in grp:
+                    mask_np = grp[h5_path.stem][()]
+                    if mask_np.shape[0] != feats_np.shape[0]:
+                        raise RuntimeError(
+                            f"mask length {mask_np.shape[0]} != patch count "
+                            f"{feats_np.shape[0]} for {h5_path.stem}"
+                        )
+                    feats_np = feats_np * mask_np.astype(np.float32)[:, None]
+                else:
+                    _logger.warning(
+                        "prompt mask missing for slide %s in %s",
+                        h5_path.stem,
+                        mask_group,
+                    )
             feats = torch.from_numpy(feats_np).float().to(device)
             coords_info = get_coords(h5)
             coords_um = torch.from_numpy(coords_info.coords_um).float()
@@ -771,3 +808,100 @@ def heatmaps_(
                     topk=topk,
                     bottomk=bottomk,
                 )
+
+    if mask_h5 is not None:
+        mask_h5.close()
+
+
+def heatmaps_crossval_(
+    *,
+    crossval_dir: Path,
+    feature_dir: Path,
+    wsi_dir: Path,
+    output_dir: Path,
+    prompt_masks_path: Path | None,
+    splits_path: Path | None = None,
+    n_folds: int | None = None,
+    slide_paths: Iterable[Path] | None = None,
+    device: DeviceLikeType,
+    default_slide_mpp: SlideMPP | None,
+    opacity: float,
+    topk: int,
+    bottomk: int,
+) -> None:
+    """Render heatmaps per fold of a completed STAMP crossval run.
+
+    For each ``split-<i>/model.ckpt`` under ``crossval_dir`` this loads the
+    fold-specific checkpoint plus the matching prompt-mask group (if any)
+    and writes outputs to ``output_dir/fold_<i>/``. Only the test slides
+    of each fold are rendered — this is an honest out-of-fold view.
+    """
+    from stamp.modeling.crossval import _Splits
+    from stamp.modeling.prompt_masks import group_for_fold, open_prompt_masks
+
+    splits_file = splits_path or (crossval_dir / "splits.json")
+    if not splits_file.exists():
+        raise RuntimeError(f"splits.json not found at {splits_file}")
+
+    splits = _Splits.model_validate_json(
+        splits_file.read_text(encoding="utf-8")
+    )
+    K = n_folds if n_folds is not None else len(splits.splits)
+    if K != len(splits.splits):
+        raise RuntimeError(
+            f"n_folds={K} != len(splits)={len(splits.splits)}"
+        )
+
+    mask_handle = (
+        open_prompt_masks(prompt_masks_path)
+        if prompt_masks_path is not None
+        else None
+    )
+
+    # Build stem→fold map by restricting to test slides of each fold.
+    for fold_i, split in enumerate(splits.splits):
+        ckpt = crossval_dir / f"split-{fold_i}" / "model.ckpt"
+        if not ckpt.exists():
+            _logger.warning(
+                "fold %d: missing checkpoint %s, skipping",
+                fold_i,
+                ckpt,
+            )
+            continue
+
+        fold_out = output_dir / f"fold_{fold_i}"
+        fold_out.mkdir(parents=True, exist_ok=True)
+
+        # When no slide_paths is given we emit heatmaps for the fold's
+        # test patients only. When the caller supplies slide_paths we
+        # intersect with the fold's test patients to avoid cross-fold
+        # contamination of the rendered view.
+        test_stems = set(split.test_patients)
+        fold_slide_paths: list[Path] | None
+        if slide_paths is not None:
+            fold_slide_paths = [
+                p for p in slide_paths if Path(p).stem in test_stems
+            ]
+        else:
+            fold_slide_paths = None
+
+        mask_group = (
+            group_for_fold(mask_handle, fold_i)
+            if mask_handle is not None
+            else None
+        )
+
+        heatmaps_(
+            feature_dir=feature_dir,
+            wsi_dir=wsi_dir,
+            checkpoint_path=ckpt,
+            output_dir=fold_out,
+            slide_paths=fold_slide_paths,
+            device=device,
+            default_slide_mpp=default_slide_mpp,
+            opacity=opacity,
+            topk=topk,
+            bottomk=bottomk,
+            prompt_masks_path=prompt_masks_path,
+            mask_group=mask_group,
+        )

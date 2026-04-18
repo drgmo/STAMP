@@ -248,6 +248,11 @@ def _run_cli(args: argparse.Namespace) -> None:
 
             if config.heatmaps is None:
                 raise ValueError("no heatmaps configuration supplied")
+            if config.heatmaps.checkpoint_path is None:
+                raise ValueError(
+                    "heatmaps: checkpoint_path is required "
+                    "(use `heatmaps-crossval` for fold-aware rendering)"
+                )
 
             _add_file_handle_(_logger, output_dir=config.heatmaps.output_dir)
             _logger.info(
@@ -265,6 +270,38 @@ def _run_cli(args: argparse.Namespace) -> None:
                 bottomk=config.heatmaps.bottomk,
                 default_slide_mpp=config.heatmaps.default_slide_mpp,
                 opacity=config.heatmaps.opacity,
+            )
+
+        case "heatmaps-crossval":
+            from stamp.heatmaps import heatmaps_crossval_
+
+            hc = config.heatmaps
+            if hc is None:
+                raise ValueError("no heatmaps configuration supplied")
+            if hc.crossval_dir is None:
+                raise ValueError(
+                    "heatmaps-crossval: crossval_dir must be set"
+                )
+
+            _add_file_handle_(_logger, output_dir=hc.output_dir)
+            _logger.info(
+                "using the following configuration:\n"
+                f"{yaml.dump(hc.model_dump(mode='json'))}"
+            )
+            heatmaps_crossval_(
+                crossval_dir=hc.crossval_dir,
+                feature_dir=hc.feature_dir,
+                wsi_dir=hc.wsi_dir,
+                output_dir=hc.output_dir,
+                prompt_masks_path=hc.prompt_masks_path,
+                splits_path=hc.splits_path,
+                n_folds=hc.n_folds,
+                slide_paths=hc.slide_paths,
+                device=hc.device,
+                topk=hc.topk,
+                bottomk=hc.bottomk,
+                default_slide_mpp=hc.default_slide_mpp,
+                opacity=hc.opacity,
             )
 
         case _:
@@ -326,6 +363,13 @@ def main() -> None:
     )
     commands.add_parser("config", help="Print the loaded configuration")
     commands.add_parser("heatmaps", help="Generate heatmaps for a trained model")
+    commands.add_parser(
+        "heatmaps-crossval",
+        help=(
+            "Generate fold-aware heatmaps across a completed crossval run. "
+            "Iterates split-<i>/model.ckpt and applies per-fold prompt masks."
+        ),
+    )
 
     args = parser.parse_args()
 

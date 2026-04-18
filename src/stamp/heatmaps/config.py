@@ -13,7 +13,39 @@ class HeatmapConfig(BaseModel):
 
     feature_dir: Path = Field(description="Directory containing extracted features")
     wsi_dir: Path = Field(description="Directory containing whole slide images")
-    checkpoint_path: Path = Field(description="Path to model checkpoint file")
+    checkpoint_path: Path | None = Field(
+        default=None,
+        description=(
+            "Path to a single model checkpoint. Required for the "
+            "`heatmaps` subcommand; ignored by `heatmaps-crossval`, which "
+            "discovers per-fold checkpoints under ``crossval_dir``."
+        ),
+    )
+
+    # Fold-aware heatmap rendering driven by WSIVL prompt-mask artefacts.
+    crossval_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Root of a STAMP crossval run (contains split-<i>/model.ckpt). "
+            "Required by the `heatmaps-crossval` subcommand; ignored otherwise."
+        ),
+    )
+    n_folds: int | None = Field(default=None, ge=2)
+    splits_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional external splits.json. If unset, STAMP reads "
+            "``crossval_dir / 'splits.json'``."
+        ),
+    )
+    prompt_masks_path: Path | None = Field(
+        default=None,
+        description=(
+            "HDF5 with prompt-derived tile masks (see "
+            "stamp.modeling.prompt_masks). When set, features are "
+            "weighted by the per-fold mask before inference."
+        ),
+    )
 
     slide_paths: list[Path] | None = Field(
         default=None,

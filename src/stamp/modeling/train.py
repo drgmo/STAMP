@@ -457,13 +457,15 @@ def setup_dataloaders_for_training(
     elif task == "regression":
         stratify = None
 
+    from stamp.modeling.crossval import CV_RANDOM_STATE
+
     train_patients, valid_patients = cast(
         tuple[Sequence[PatientId], Sequence[PatientId]],
         train_test_split(
             list(patient_to_data),
             stratify=cast(Any, stratify),
             shuffle=True,
-            random_state=0,
+            random_state=CV_RANDOM_STATE,
         ),
     )
 
